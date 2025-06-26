@@ -28,11 +28,11 @@ import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Collections
 
-class BalanceViewModel : ViewModel(), WalletService.Observer {
+class MainViewModel : ViewModel(), WalletService.Observer {
 
     private companion object {
         const val WALLET_NAME = "test"
-        const val TAG = "BalanceViewModel"
+        const val TAG = "MainViewModel"
     }
 
     val uiState = mutableStateOf<BalanceUiState>(BalanceUiState())
@@ -61,6 +61,16 @@ class BalanceViewModel : ViewModel(), WalletService.Observer {
                 notInstalled()
             }
         })
+    }
+
+    fun stop() {
+        viewModelScope.launch {
+            walletService.stop()
+
+            uiState.value = uiState.value.copy(
+                state = "Not synced"
+            )
+        }
     }
 
     fun onDebugClick() {
@@ -117,13 +127,12 @@ class BalanceViewModel : ViewModel(), WalletService.Observer {
         }*/
     }
 
-    fun onClearClick() {
-        viewModelScope.launch {
-            walletService.stop()
+    fun clearWallet() {
+        viewModelScope.launch(Dispatchers.Default) {
+            walletService.stop(false)
             uiState.value = uiState.value.copy(
                 state = "Not synced"
             )
-//        wallet.pauseRefresh()
             removeWalletRelatedFiles(MyApplication.Companion.instance, WALLET_NAME)
             initWallet()
         }
@@ -158,19 +167,6 @@ class BalanceViewModel : ViewModel(), WalletService.Observer {
             wallet = WalletManager.getInstance()
                 .openWallet(getWalletFullPath().absolutePath, walletPassword)
         }*/
-
-
-    /*
-        private fun updateUIState(height: Long = 0) {
-            uiState.value = uiState.value.copy(
-                networkName = wallet.networkType.name,
-                state = getConnectionStatus(),
-                balance = wallet.unlockedBalance.toString(),
-                balanceUnspendable = wallet.balance.toString(),
-                lastBlock = height.toString(),
-            )
-        }
-    */
 
     /***
      * @param dateOrHeight - YYYY-MM-DD or height
@@ -244,20 +240,21 @@ class BalanceViewModel : ViewModel(), WalletService.Observer {
         wallet: Wallet?,
         full: Boolean
     ): Boolean {
-        Log.d(TAG, "onRefreshed() called with: blocks = ${WalletManager.getInstance().blockchainHeight}, ${WalletManager.getInstance().blockTarget}, ${WalletManager.getInstance().blockchainTargetHeight}")
-        val progress: Double = if (full) {
-            1.0
+        val wallet = wallet ?: return true
+        Log.d(TAG, "onRefreshed() called with blocks: wallet ${wallet.blockChainHeight}, walletManager ${WalletManager.getInstance().blockchainHeight},")
+        val blocksLeft = if (full) {
+            0
         } else {
-            (wallet?.blockChainHeight ?: 0.0).toDouble() / WalletManager.getInstance().blockchainHeight
+            WalletManager.getInstance().blockchainHeight - wallet.blockChainHeight
         }
-        val lockedBalance = (wallet?.balance?:0) - (wallet?.unlockedBalance?:0)
+        val lockedBalance = (wallet.balance) - (wallet.unlockedBalance)
         uiState.value = uiState.value.copy(
-            balance = wallet?.unlockedBalance?.toString() ?: "0",
+            balance = Helper.getDisplayAmount(wallet.getBalanceAll(), 5),
             balanceUnspendable = lockedBalance.toString(),
             lastBlock = WalletManager.getInstance().blockchainHeight.toString(),
-            state = if (progress == 1.0) "Synced" else "Syncing %.2f".format(progress)
+            state = if (blocksLeft == 0L) "Synced" else "Syncing, $blocksLeft blocks left"
         )
-        Log.d(TAG, "onRefreshed() called with: wallet = $wallet, full = $full")
+        Log.d(TAG, "onRefreshed() called with: isSynchronized = ${wallet.isSynchronized}, full = $full")
         return true
     }
 

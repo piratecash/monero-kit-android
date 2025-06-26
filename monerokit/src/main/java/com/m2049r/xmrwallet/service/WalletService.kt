@@ -242,11 +242,11 @@ class WalletService(private val appContext: Context) {
      * must be called from worker thread to avoid ANR
      */
     @WorkerThread
-    fun stop() {
+    fun stop(saveWallet: Boolean = true) {
         Timber.d("stop()")
 
-        wallet?.store()?.let {
-            observer?.onWalletStored(it)
+        if(saveWallet) {
+            storeWallet()
         }
 
         setObserver(null) // in case it was not reset already
@@ -259,6 +259,12 @@ class WalletService(private val appContext: Context) {
             listener = null
         }
         running = false
+    }
+
+    fun storeWallet() {
+        wallet?.store()?.let {
+            observer?.onWalletStored(it)
+        }
     }
 
     fun sweep(txTag: String) {

@@ -4,47 +4,38 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.piratecash.monero.ui.Destination
 import com.piratecash.monero.ui.balance.BalanceScreen
-import com.piratecash.monero.ui.balance.BalanceViewModel
+import com.piratecash.monero.ui.balance.MainViewModel
 import com.piratecash.monero.ui.send.SendScreen
 import com.piratecash.monero.ui.send.SendViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(modifier: Modifier = Modifier) {
+fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
 
     Scaffold(
         modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        Destination.entries[selectedDestination].title,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors()
-            )
-        },
         bottomBar = {
             NavigationBar {
                 Destination.entries.forEachIndexed { index, destination ->
+                    val title = when (destination) {
+                        Destination.Balance -> "Balance"
+                        Destination.Transactions -> "Transactions"
+                        Destination.Send -> "Send"
+                    }
                     NavigationBarItem(
                         selected = selectedDestination == index,
                         onClick = {
@@ -59,7 +50,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                             selectedDestination = index
                         },
                         icon = {},
-                        label = { Text(destination.title) }
+                        label = { Text(title) }
                     )
                 }
             }
@@ -67,21 +58,20 @@ fun MainScreen(modifier: Modifier = Modifier) {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Destination.Balance::class,
+            startDestination = Destination.Balance,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Destination.Balance::class) {
-                val viewModel: BalanceViewModel = viewModel()
+            composable<Destination.Balance> {
                 BalanceScreen(
                     uiState = viewModel.uiState.value,
                     onStartClick = viewModel::onStartClick,
                     onDebugClick = viewModel::onDebugClick,
-                    onClearClick = viewModel::onClearClick,
+                    onClearClick = viewModel::clearWallet,
                     onStatusClick = viewModel::onStatusClick
                 )
             }
 //            composable(Destination.Transactions::class) { TransactionsScreen() }
-            composable(Destination.Send::class) {
+            composable<Destination.Send> {
                 val viewModel: SendViewModel = viewModel()
                 SendScreen(
                     uiState = viewModel.uiState.value,

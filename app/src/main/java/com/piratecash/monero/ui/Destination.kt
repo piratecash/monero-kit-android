@@ -1,9 +1,16 @@
 package com.piratecash.monero.ui
 
-sealed class Destination(val title: String) {
-    object Balance : Destination("Balance")
-    object Transactions : Destination("Transactions")
-    object Send : Destination("Send")
+import kotlinx.serialization.Serializable
+
+sealed interface Destination {
+    @Serializable
+    data object Balance : Destination
+
+    @Serializable
+    data object Transactions : Destination
+
+    @Serializable
+    data object Send : Destination
 
     companion object {
         val entries = listOf(Balance, Transactions, Send)

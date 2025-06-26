@@ -7,11 +7,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
-import com.piratecash.monero.ui.balance.BalanceViewModel
+import com.piratecash.monero.ui.balance.MainViewModel
 import com.piratecash.monero.ui.theme.MonerokitandroidTheme
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: BalanceViewModel by viewModels<BalanceViewModel>()
+    private val viewModel: MainViewModel by viewModels<MainViewModel>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,8 +22,13 @@ class MainActivity : ComponentActivity() {
                     viewModel.initWallet()
                 }
 
-                MainScreen()
+                MainScreen(viewModel)
             }
         }
+    }
+
+    override fun onPause() {
+        viewModel.stop()
+        super.onPause()
     }
 }

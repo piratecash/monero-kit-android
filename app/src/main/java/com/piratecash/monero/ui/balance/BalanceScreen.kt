@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,174 +32,177 @@ fun BalanceScreen(
     onStatusClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .background(Color.White)
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Top
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.White)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Top
+    ) {
+        Text(
+            text = "Balance",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+
+        SelectionContainer(
+            modifier = Modifier
+                .padding(vertical = 20.dp)
         ) {
-            SelectionContainer(
-                modifier = Modifier
-                    .padding(vertical = 20.dp)
-            ) {
-                Text(
-                    text = "Address: ${uiState.address}",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Normal,
-                )
-            }
-            // Network
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Network:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.networkName,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+            Text(
+                text = "Address: ${uiState.address}",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Normal,
+            )
+        }
+        // Network
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Network:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.networkName,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // Balance
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Balance:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.balance,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+        // Balance
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Balance:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.balance,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // Balance Unspendable
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Balance Unspendable:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.balanceUnspendable,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+        // Balance Unspendable
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Balance Unspendable:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.balanceUnspendable,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // State
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "State:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.state,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+        // State
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "State:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.state,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // Last Block
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Last Block:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.lastBlock,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+        // Last Block
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Last Block:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.lastBlock,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            // Until
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Until:",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = uiState.lastBlockDate,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
+        // Until
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Until:",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = uiState.lastBlockDate,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
 
-            Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-            // Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Button(
-                        onClick = onStartClick
-                    ) {
-                        Text("Start")
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Button(
-                        onClick = onClearClick
-                    ) {
-                        Text("Clear")
-                    }
+        // Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Button(
+                    onClick = onStartClick
+                ) {
+                    Text("Start")
                 }
 
-                Column {
-                    Button(
-                        onClick = onDebugClick
-                    ) {
-                        Text("Debug info")
-                    }
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onClearClick
+                ) {
+                    Text("Clear")
+                }
+            }
 
-                    Button(
-                        onClick = onStatusClick
-                    ) {
-                        Text("Status")
-                    }
+            Column {
+                Button(
+                    onClick = onDebugClick
+                ) {
+                    Text("Debug info")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = onStatusClick
+                ) {
+                    Text("Status")
                 }
             }
         }
