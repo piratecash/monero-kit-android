@@ -185,7 +185,6 @@ class WalletService(private val appContext: Context) {
     }
 
     val wallet: Wallet?
-        //
         get() = WalletManager.getInstance().wallet
 
 
