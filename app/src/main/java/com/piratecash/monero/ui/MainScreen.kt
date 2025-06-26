@@ -15,7 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.piratecash.monero.ui.Destination
 import com.piratecash.monero.ui.balance.BalanceScreen
-import com.piratecash.monero.ui.balance.MainViewModel
+import com.piratecash.monero.ui.MainViewModel
 import com.piratecash.monero.ui.send.SendScreen
 import com.piratecash.monero.ui.transactions.TransactionsScreen
 

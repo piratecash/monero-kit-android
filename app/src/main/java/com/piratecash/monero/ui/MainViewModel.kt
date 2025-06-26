@@ -1,4 +1,4 @@
-package com.piratecash.monero.ui.balance
+package com.piratecash.monero.ui
 
 import android.content.Context
 import android.util.Log
@@ -329,7 +329,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         }
         viewModelScope.launch {
             val isValid = withContext(Dispatchers.Default) {
-                com.m2049r.xmrwallet.model.Wallet.isAddressValid(address)
+                Wallet.isAddressValid(address)
             }
             if (!isValid) {
                 uiState.value = uiState.value.copy(isAddressToValid = false, errorSending = "Invalid address")

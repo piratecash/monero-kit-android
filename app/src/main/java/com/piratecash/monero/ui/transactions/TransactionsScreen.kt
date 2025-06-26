@@ -15,11 +15,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.piratecash.monero.ui.balance.MainUiState
+import com.piratecash.monero.ui.MainUiState
 import java.text.SimpleDateFormat
 import java.util.Date
 import androidx.compose.ui.tooling.preview.Preview
-import com.piratecash.monero.ui.balance.TransactionUiModel
+import com.piratecash.monero.ui.TransactionUiModel
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 
