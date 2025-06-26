@@ -9,6 +9,8 @@ import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.levin.util.NetCipherHelper.OnStatusChangedListener
 import com.m2049r.xmrwallet.data.DefaultNodes
 import com.m2049r.xmrwallet.data.NodeInfo
+import com.m2049r.xmrwallet.data.TxData
+import com.m2049r.xmrwallet.data.UserNotes
 import com.m2049r.xmrwallet.model.NetworkType
 import com.m2049r.xmrwallet.model.PendingTransaction
 import com.m2049r.xmrwallet.model.Wallet
@@ -22,6 +24,7 @@ import com.piratecash.monero.BuildConfig
 import com.piratecash.monero.MyApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import java.text.ParseException
@@ -289,6 +292,43 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 
     fun onSendClick() {
+        val address = uiState.value.addressTo
+        val amountStr = uiState.value.amountTo
+        val notes = uiState.value.notesTo
+        val wallet = walletService.wallet
+        if (wallet == null) {
+            uiState.value = uiState.value.copy(errorSending = "Wallet not loaded")
+            return
+        }
+        viewModelScope.launch {
+            val isValid = withContext(Dispatchers.Default) {
+                com.m2049r.xmrwallet.model.Wallet.isAddressValid(address)
+            }
+            if (!isValid) {
+                uiState.value = uiState.value.copy(isAddressToValid = false, errorSending = "Invalid address")
+                return@launch
+            }
+            val amount = amountStr.toDoubleOrNull()
+            if (amount == null || amount <= 0) {
+                uiState.value = uiState.value.copy(errorSending = "Invalid amount")
+                return@launch
+            }
+            uiState.value = uiState.value.copy(isLoadingSending = true, errorSending = null)
+            withContext(Dispatchers.IO) {
+                try {
+                    val txData = TxData()
+                    txData.destination = address
+                    txData.setAmount(amount)
+                    txData.setMixin(wallet.getDefaultMixin())
+                    txData.setPriority(PendingTransaction.Priority.Priority_Default)
+                    txData.setUserNotes(UserNotes(notes))
+                    walletService.prepareTransaction("send", txData)
+                    walletService.sendTransaction(notes)
+                } catch (e: Exception) {
+                    uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = e.message)
+                }
+            }
+        }
     }
 
     override fun onProgress(text: String?) {
@@ -310,18 +350,18 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         tag: String?,
         pendingTransaction: PendingTransaction?
     ) {
-        Log.d(
-            TAG,
-            "onTransactionCreated() called with: tag = $tag, pendingTransaction = $pendingTransaction"
-        )
+        Log.d(TAG, "onTransactionCreated() called with: tag = $tag, pendingTransaction = $pendingTransaction")
+        uiState.value = uiState.value.copy(isLoadingSending = false)
     }
 
     override fun onTransactionSent(txid: String?) {
         Log.d(TAG, "onTransactionSent() called with: txid = $txid")
+        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = null, addressTo = "", amountTo = "", notesTo = "")
     }
 
     override fun onSendTransactionFailed(error: String?) {
         Log.d(TAG, "onSendTransactionFailed() called with: error = $error")
+        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = error)
     }
 
     override fun onWalletStarted(walletStatus: Wallet.Status?) {
@@ -355,7 +395,7 @@ data class MainUiState(
     val lastBlockDate: String = "",
     val transactions: List<TransactionUiModel> = emptyList(),
 
-    val addressTo: String = "",
+    val addressTo: String = "8AP6CMR9y8uBrsGb1ySiaQKhRrWruoC3iMHt8edQMd59HmUz1rewL78jNb9feGg1n5NysH86sxnQb1ny66XuDVFwAW44YX9",
     val amountTo: String = "",
     val notesTo: String = "",
     val isAddressToValid: Boolean = true,
