@@ -16,8 +16,6 @@
 
 package com.m2049r.xmrwallet.data;
 
-import static android.util.Log.println;
-
 import android.util.Log;
 
 import com.m2049r.levin.scanner.LevinPeer;

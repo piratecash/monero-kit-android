@@ -77,13 +77,13 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 
     fun initWallet() {
+        NetCipherHelper.createInstance(MyApplication.instance)
         Helper.setMoneroHome(MyApplication.instance)
 
         if (BuildConfig.DEBUG) {
             Helper.initLogger(MyApplication.instance, WalletManager.LOGLEVEL_DEBUG)
         }
 
-        NetCipherHelper.createInstance(MyApplication.Companion.instance)
         NetCipherHelper.register(object : OnStatusChangedListener {
             override fun connected() {
                 Timber.d("CONNECTED")
@@ -121,7 +121,6 @@ class MainViewModel : ViewModel(), WalletService.Observer {
 
         walletService = WalletService(MyApplication.Companion.instance)
         walletService.setObserver(this)
-        walletService.create()
 
 //        walletService.stop() - must be called in the end
 
@@ -288,7 +287,12 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         full: Boolean
     ): Boolean {
         val wallet = wallet ?: return true
-        Log.d(TAG, "onRefreshed() called with blocks: wallet ${wallet.blockChainHeight}, walletManager ${WalletManager.getInstance().blockchainHeight},")
+        Timber.tag(TAG)
+            .d("Balance: ${wallet.getBalanceAll()}")
+        Timber.tag(TAG)
+            .d("Unlocked balance: ${wallet.getUnlockedBalanceAll()}")
+        Timber.tag(TAG)
+            .d("onRefreshed() called with blocks: wallet ${wallet.blockChainHeight}, walletManager ${WalletManager.getInstance().blockchainHeight},")
         val blocksLeft = if (full) {
             0
         } else {

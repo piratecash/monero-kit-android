@@ -190,19 +190,6 @@ class WalletService(private val appContext: Context) {
 
     private var errorState = false
 
-    fun create() {
-        // We are using a HandlerThread and a Looper to avoid loading and closing
-        // concurrency
-        val thread = MoneroHandlerThread(
-            "WalletService",
-            Process.THREAD_PRIORITY_BACKGROUND
-        )
-        thread.start()
-
-        // Get the HandlerThread's Looper and use it for our Handler
-        Timber.d("Service created")
-    }
-
     fun start(walletName: String?, walletPassword: String?): Wallet.Status? {
         running = true
         Timber.d("start()")
