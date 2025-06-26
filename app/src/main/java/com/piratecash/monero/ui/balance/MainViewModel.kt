@@ -236,6 +236,23 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         File(walletFolder, "$walletName.address.txt").delete()
     }
 
+    private fun updateTransactions(wallet: Wallet) {
+        val txs = wallet.getHistory().all.map { tx ->
+            TransactionUiModel(
+                account = tx.accountIndex,
+                notes = tx.notes,
+                destination = tx.address,
+                paymentId = tx.paymentId,
+                txId = tx.hash,
+                txKey = tx.txKey,
+                block = tx.blockheight,
+                date = tx.timestamp,
+                fee = tx.fee
+            )
+        }
+        uiState.value = uiState.value.copy(transactions = txs)
+    }
+
     override fun onRefreshed(
         wallet: Wallet?,
         full: Boolean
@@ -254,8 +271,24 @@ class MainViewModel : ViewModel(), WalletService.Observer {
             lastBlock = WalletManager.getInstance().blockchainHeight.toString(),
             state = if (blocksLeft == 0L) "Synced" else "Syncing, $blocksLeft blocks left"
         )
+        updateTransactions(wallet)
         Log.d(TAG, "onRefreshed() called with: isSynchronized = ${wallet.isSynchronized}, full = $full")
         return true
+    }
+
+    fun onAddressChange(address: String) {
+        uiState.value = uiState.value.copy(addressTo = address)
+    }
+
+    fun onAmountChange(amount: String) {
+        uiState.value = uiState.value.copy(amountTo = amount)
+    }
+
+    fun onNotesChange(notes: String) {
+        uiState.value = uiState.value.copy(notesTo = notes)
+    }
+
+    fun onSendClick() {
     }
 
     override fun onProgress(text: String?) {
@@ -300,6 +333,18 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 }
 
+data class TransactionUiModel(
+    val account: Int,
+    val notes: String?,
+    val destination: String?,
+    val paymentId: String?,
+    val txId: String?,
+    val txKey: String?,
+    val block: Long,
+    val date: Long,
+    val fee: Long
+)
+
 data class MainUiState(
     val networkName: String = "",
     val address: String = "N/A",
@@ -307,5 +352,14 @@ data class MainUiState(
     val balanceUnspendable: String = "",
     val state: String = "Not synced",
     val lastBlock: String = "N/A",
-    val lastBlockDate: String = ""
+    val lastBlockDate: String = "",
+    val transactions: List<TransactionUiModel> = emptyList(),
+
+    val addressTo: String = "",
+    val amountTo: String = "",
+    val notesTo: String = "",
+    val isAddressToValid: Boolean = true,
+    val isLoadingSending: Boolean = false,
+    val errorSending: String? = null,
+    val maxAmountTo: Double = 0.0
 )

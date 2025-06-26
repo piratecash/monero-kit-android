@@ -29,11 +29,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.piratecash.monero.ui.balance.MainUiState
 import com.piratecash.monero.ui.theme.MonerokitandroidTheme
 
 @Composable
 fun SendScreen(
-    uiState: SendUiState,
+    uiState: MainUiState,
     onAddressChange: (String) -> Unit,
     onAmountChange: (String) -> Unit,
     onNotesChange: (String) -> Unit,
@@ -53,53 +54,53 @@ fun SendScreen(
 
         // Address Field
         OutlinedTextField(
-            value = uiState.address,
+            value = uiState.addressTo,
             onValueChange = onAddressChange,
             label = { Text("Recipient Address") },
             placeholder = { Text("Enter Monero address") },
             modifier = Modifier.fillMaxWidth(),
-            isError = uiState.address.isNotEmpty() && !uiState.isAddressValid,
+            isError = uiState.addressTo.isNotEmpty() && !uiState.isAddressToValid,
             supportingText = {
-                if (uiState.address.isNotEmpty() && !uiState.isAddressValid) {
+                if (uiState.addressTo.isNotEmpty() && !uiState.isAddressToValid) {
                     Text(
                         text = "Invalid Monero address",
                         color = MaterialTheme.colorScheme.error
                     )
                 }
             },
-            enabled = !uiState.isLoading
+            enabled = !uiState.isLoadingSending
         )
 
         // Amount Field
         OutlinedTextField(
-            value = uiState.amount,
+            value = uiState.amountTo,
             onValueChange = onAmountChange,
             label = { Text("Amount") },
             placeholder = { Text("0.00") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             suffix = { Text("XMR") },
-            enabled = !uiState.isLoading,
+            enabled = !uiState.isLoadingSending,
             supportingText = {
-                if (uiState.maxAmount > 0) {
-                    Text("Available: ${uiState.maxAmount} XMR")
+                if (uiState.maxAmountTo > 0) {
+                    Text("Available: ${uiState.maxAmountTo} XMR")
                 }
             }
         )
 
         // Notes Field (Optional)
         OutlinedTextField(
-            value = uiState.notes,
+            value = uiState.notesTo,
             onValueChange = onNotesChange,
             label = { Text("Notes (Optional)") },
             placeholder = { Text("Add a note for this transaction") },
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3,
-            enabled = !uiState.isLoading
+            enabled = !uiState.isLoadingSending
         )
 
         // Error message
-        if (uiState.error != null) {
+        if (uiState.errorSending != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -107,7 +108,7 @@ fun SendScreen(
                 )
             ) {
                 Text(
-                    text = uiState.error,
+                    text = uiState.errorSending,
                     modifier = Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
@@ -117,7 +118,7 @@ fun SendScreen(
         Spacer(modifier = Modifier.weight(1f))
 
         // Transaction Summary Card
-        if (uiState.address.isNotEmpty() && uiState.amount.isNotEmpty() && uiState.isAddressValid) {
+        if (uiState.address.isNotEmpty() && uiState.amountTo.isNotEmpty() && uiState.isAddressToValid) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -139,7 +140,7 @@ fun SendScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Amount:")
-                        Text("${uiState.amount} XMR", fontWeight = FontWeight.Medium)
+                        Text("${uiState.amountTo} XMR", fontWeight = FontWeight.Medium)
                     }
 
                     Row(
@@ -158,7 +159,7 @@ fun SendScreen(
                     ) {
                         Text("Total:", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "${(uiState.amount.toDoubleOrNull() ?: 0.0) + 0.00015} XMR",
+                            text = "${(uiState.amountTo.toDoubleOrNull() ?: 0.0) + 0.00015} XMR",
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -173,15 +174,15 @@ fun SendScreen(
                 .fillMaxWidth()
                 .height(50.dp),
             enabled = uiState.address.isNotEmpty() &&
-                    uiState.amount.isNotEmpty() &&
-                    uiState.isAddressValid &&
-                    (uiState.amount.toDoubleOrNull() ?: 0.0) > 0 &&
-                    !uiState.isLoading,
+                    uiState.amountTo.isNotEmpty() &&
+                    uiState.isAddressToValid &&
+                    (uiState.amountTo.toDoubleOrNull() ?: 0.0) > 0 &&
+                    !uiState.isLoadingSending,
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
             )
         ) {
-            if (uiState.isLoading) {
+            if (uiState.isLoadingSending) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     color = MaterialTheme.colorScheme.onPrimary
@@ -195,7 +196,7 @@ fun SendScreen(
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (uiState.isLoading) "Sending..." else "Send Monero",
+                text = if (uiState.isLoadingSending) "Sending..." else "Send Monero",
                 style = MaterialTheme.typography.titleMedium
             )
         }
@@ -207,7 +208,7 @@ fun SendScreen(
 private fun SendScreenPreview() {
     MonerokitandroidTheme {
         SendScreen(
-            uiState = SendUiState(),
+            uiState = MainUiState(),
             onAddressChange = {},
             onAmountChange = {},
             onNotesChange = {},
