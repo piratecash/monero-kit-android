@@ -27,9 +27,7 @@ import androidx.compose.ui.unit.sp
 fun BalanceScreen(
     uiState: MainUiState,
     onStartClick: () -> Unit,
-    onDebugClick: () -> Unit,
     onClearClick: () -> Unit,
-    onStatusClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -174,36 +172,17 @@ fun BalanceScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Button(
-                    onClick = onStartClick
-                ) {
-                    Text("Start")
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = onClearClick
-                ) {
-                    Text("Clear")
-                }
+            Button(
+                onClick = onStartClick
+            ) {
+                Text("Start")
             }
+            Spacer(modifier = Modifier.weight(1f))
 
-            Column {
-                Button(
-                    onClick = onDebugClick
-                ) {
-                    Text("Debug info")
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = onStatusClick
-                ) {
-                    Text("Status")
-                }
+            Button(
+                onClick = onClearClick
+            ) {
+                Text("Clear")
             }
         }
     }
@@ -222,8 +201,6 @@ fun MainScreenPreview() {
             lastBlockDate = "2019-01-01 12:12:12"
         ),
         onStartClick = {},
-        onDebugClick = {},
         onClearClick = {},
-        onStatusClick = {}
     )
 }

@@ -1,11 +1,5 @@
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -16,8 +10,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -72,9 +64,7 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 BalanceScreen(
                     uiState = viewModel.uiState.value,
                     onStartClick = viewModel::onStartClick,
-                    onDebugClick = viewModel::onDebugClick,
                     onClearClick = viewModel::clearWallet,
-                    onStatusClick = viewModel::onStatusClick
                 )
             }
             composable<Destination.Transactions> {

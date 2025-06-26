@@ -76,17 +76,44 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         }
     }
 
-    fun onDebugClick() {
-
-    }
-
-    fun onStatusClick() {
-
-    }
-
     fun initWallet() {
+        Helper.setMoneroHome(MyApplication.instance)
+
+        if (BuildConfig.DEBUG) {
+            Helper.initLogger(MyApplication.instance, WalletManager.LOGLEVEL_DEBUG)
+        }
+
         NetCipherHelper.createInstance(MyApplication.Companion.instance)
-        NetCipherHelper.getInstance().createClearnetClient()
+        NetCipherHelper.register(object : OnStatusChangedListener {
+            override fun connected() {
+                Timber.d("CONNECTED")
+                WalletManager.getInstance().setProxy(NetCipherHelper.getProxy())
+                /*torNotify()
+                if (waitingUiTask != null) {
+                    Timber.d("RUN")
+                    runOnUiThread(waitingUiTask)
+                    waitingUiTask = null
+                }*/
+            }
+
+            override fun disconnected() {
+                Timber.d("DISCONNECTED")
+                WalletManager.getInstance().setProxy("")
+//                torNotify()
+            }
+
+            override fun notInstalled() {
+                Timber.d("NOT INSTALLED")
+                WalletManager.getInstance().setProxy("")
+//                torNotify()
+            }
+
+            override fun notEnabled() {
+                Timber.d("NOT ENABLED")
+                notInstalled()
+            }
+        })
+//        NetCipherHelper.getInstance().createClearnetClient()
 
         if (!isWalletFilesExist(MyApplication.Companion.instance, WALLET_NAME)) {
             createWallet()
@@ -204,9 +231,9 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 
     private fun isWalletFilesExist(context: Context, walletName: String) =
-        getFileName(context, walletName) == null
+        getFileNameIfNotExists(context, walletName) == null
 
-    private fun getFileName(context: Context, walletName: String): File? {
+    private fun getFileNameIfNotExists(context: Context, walletName: String): File? {
         // check if the wallet we want to create already exists
         val walletFolder: File = Helper.getWalletRoot(context);
         if (!walletFolder.isDirectory()) {
@@ -275,7 +302,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
             state = if (blocksLeft == 0L) "Synced" else "Syncing, $blocksLeft blocks left"
         )
         updateTransactions(wallet)
-        Log.d(TAG, "onRefreshed() called with: isSynchronized = ${wallet.isSynchronized}, full = $full")
+        Log.d(TAG, "onRefreshed() called with: isSynchronized = ${wallet.isSynchronized}, secretViewKey = ${wallet.secretViewKey}, full = $full")
         return true
     }
 

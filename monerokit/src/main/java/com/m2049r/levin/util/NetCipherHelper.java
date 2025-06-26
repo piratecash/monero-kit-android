@@ -118,7 +118,7 @@ public class NetCipherHelper implements StatusCallback {
         }
     }
 
-    public void createClearnetClient() {
+    private void createClearnetClient() {
         try {
             client = new OkHttpClient.Builder()
                     .connectTimeout(HTTP_TIMEOUT_CONNECT, TimeUnit.MILLISECONDS)
