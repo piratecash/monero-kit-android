@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun BalanceScreen(
-    uiState: BalanceUiState,
+    uiState: MainUiState,
     onStartClick: () -> Unit,
     onDebugClick: () -> Unit,
     onClearClick: () -> Unit,
@@ -213,7 +213,7 @@ fun BalanceScreen(
 @Composable
 fun MainScreenPreview() {
     BalanceScreen(
-        uiState = BalanceUiState(
+        uiState = MainUiState(
             networkName = "MainNet",
             balance = "100.0",
             balanceUnspendable = "10.0",

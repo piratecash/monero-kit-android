@@ -35,7 +35,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         const val TAG = "MainViewModel"
     }
 
-    val uiState = mutableStateOf<BalanceUiState>(BalanceUiState())
+    val uiState = mutableStateOf<MainUiState>(MainUiState())
 
     private lateinit var walletService: WalletService
 
@@ -300,7 +300,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 }
 
-data class BalanceUiState(
+data class MainUiState(
     val networkName: String = "",
     val address: String = "N/A",
     val balance: String = "",
