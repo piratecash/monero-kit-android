@@ -189,7 +189,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
 
     private fun createWallet() {
         // create the real wallet password
-        val crazyPass: String? = KeyStoreHelper.getCrazyPass(MyApplication.Companion.instance, "")
+        val crazyPass: String? = KeyStoreHelper.getCrazyPass(MyApplication.instance, "")
         val seed = BuildConfig.WORDS
         val restoreHeight = getHeight(BuildConfig.RESTORE_HEIGHT)
         WalletManager.getInstance()
@@ -257,7 +257,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
     }
 
     private fun getWalletFullPath() =
-        File(Helper.getWalletRoot(MyApplication.Companion.instance), WALLET_NAME)
+        File(Helper.getWalletRoot(MyApplication.instance), WALLET_NAME)
 
     private fun removeWalletRelatedFiles(context: Context, walletName: String) {
         // check if the wallet we want to create already exists
