@@ -446,7 +446,7 @@ data class MainUiState(
     val lastBlockDate: String = "",
     val transactions: List<TransactionUiModel> = emptyList(),
 
-    val addressTo: String = "48br3v6opNt4ZFehxnaWE33aq3Ymve2bP9bGjhKTuHgdS3i2vdewcWaMDpn6JdbWB1jXNZBeRdCcb42xgAZhR7hgA2tCqEs",
+    val addressTo: String = "",
     val amountTo: String = "",
     val notesTo: String = "",
     val isAddressToValid: Boolean = true,
