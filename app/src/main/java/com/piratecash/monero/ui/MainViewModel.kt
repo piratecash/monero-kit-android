@@ -13,6 +13,7 @@ import com.m2049r.xmrwallet.data.TxData
 import com.m2049r.xmrwallet.data.UserNotes
 import com.m2049r.xmrwallet.model.NetworkType
 import com.m2049r.xmrwallet.model.PendingTransaction
+import com.m2049r.xmrwallet.model.TransactionInfo
 import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.WalletManager
 import com.m2049r.xmrwallet.service.WalletService
@@ -287,8 +288,11 @@ class MainViewModel : ViewModel(), WalletService.Observer {
                 txKey = tx.txKey,
                 block = tx.blockheight,
                 date = tx.timestamp,
-                fee = tx.fee,
-                amount = Helper.getDisplayAmount(tx.amount, 5)
+                fee = Helper.getDisplayAmount(tx.fee, 5),
+                amount = Helper.getDisplayAmount(tx.amount, 5),
+                isPending = tx.isPending,
+                direction = if (tx.direction == TransactionInfo.Direction.Direction_In) "Incoming" else "Outgoing",
+                isFailed = tx.isFailed
             )
         }
         uiState.value = uiState.value.copy(transactions = txs)
@@ -425,8 +429,11 @@ data class TransactionUiModel(
     val txKey: String?,
     val block: Long,
     val date: Long,
-    val fee: Long,
-    val amount: String
+    val fee: String,
+    val amount: String,
+    val isPending: Boolean,
+    val direction: String,
+    val isFailed: Boolean
 )
 
 data class MainUiState(
@@ -439,7 +446,7 @@ data class MainUiState(
     val lastBlockDate: String = "",
     val transactions: List<TransactionUiModel> = emptyList(),
 
-    val addressTo: String = "8AP6CMR9y8uBrsGb1ySiaQKhRrWruoC3iMHt8edQMd59HmUz1rewL78jNb9feGg1n5NysH86sxnQb1ny66XuDVFwAW44YX9",
+    val addressTo: String = "48br3v6opNt4ZFehxnaWE33aq3Ymve2bP9bGjhKTuHgdS3i2vdewcWaMDpn6JdbWB1jXNZBeRdCcb42xgAZhR7hgA2tCqEs",
     val amountTo: String = "",
     val notesTo: String = "",
     val isAddressToValid: Boolean = true,
