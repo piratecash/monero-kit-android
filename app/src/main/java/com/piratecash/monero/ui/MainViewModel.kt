@@ -16,7 +16,7 @@ import com.m2049r.xmrwallet.model.PendingTransaction
 import com.m2049r.xmrwallet.model.TransactionInfo
 import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.WalletManager
-import com.m2049r.xmrwallet.service.WalletService
+import com.m2049r.xmrwallet.service.MoneroWalletService
 import com.m2049r.xmrwallet.util.Helper
 import com.m2049r.xmrwallet.util.KeyStoreHelper
 import com.m2049r.xmrwallet.util.NodePinger
@@ -32,7 +32,7 @@ import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Collections
 
-class MainViewModel : ViewModel(), WalletService.Observer {
+class MainViewModel : ViewModel(), MoneroWalletService.Observer {
 
     private companion object {
         const val WALLET_NAME = "test"
@@ -41,7 +41,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
 
     val uiState = mutableStateOf<MainUiState>(MainUiState())
 
-    private lateinit var walletService: WalletService
+    private lateinit var walletService: MoneroWalletService
 
     private fun registerTor() {
         NetCipherHelper.register(object : OnStatusChangedListener {
@@ -120,7 +120,7 @@ class MainViewModel : ViewModel(), WalletService.Observer {
             createWallet()
         }
 
-        walletService = WalletService(MyApplication.Companion.instance)
+        walletService = MoneroWalletService(MyApplication.Companion.instance)
         walletService.setObserver(this)
 
 //        walletService.stop() - must be called in the end

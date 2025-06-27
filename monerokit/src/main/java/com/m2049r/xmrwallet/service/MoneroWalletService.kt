@@ -27,7 +27,7 @@ import com.m2049r.xmrwallet.model.WalletManager
 import com.m2049r.xmrwallet.util.Helper
 import timber.log.Timber
 
-class WalletService(private val appContext: Context) {
+class MoneroWalletService(private val appContext: Context) {
     private var listener: MyWalletListener? = null
 
     private inner class MyWalletListener : WalletListener {
