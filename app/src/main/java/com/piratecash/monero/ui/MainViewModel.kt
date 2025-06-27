@@ -163,6 +163,11 @@ class MainViewModel : ViewModel(), WalletService.Observer {
                 state = "Not synced"
             )
             removeWalletRelatedFiles(MyApplication.Companion.instance, WALLET_NAME)
+            if(!isWalletFilesExist(MyApplication.Companion.instance, WALLET_NAME)) {
+                Timber.tag(TAG).d("Wallet files removed")
+            } else {
+                throw Exception("Wallet files not removed")
+            }
             initWallet()
         }
     }
