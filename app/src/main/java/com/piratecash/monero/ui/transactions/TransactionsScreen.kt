@@ -61,6 +61,7 @@ fun TransactionsScreen(uiState: MainUiState) {
                             Text("Block: ${tx.block}")
                             Text("Date: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(Date(tx.date * 1000))}")
                             Text("Fee: ${tx.fee}")
+                            Text("Amount: ${tx.amount}")
                         }
                     }
                 }
@@ -84,7 +85,8 @@ fun TransactionsScreenPreview() {
                     txKey = "aabbccddeeff...",
                     block = 123456,
                     date = 1710000000,
-                    fee = 15000L
+                    fee = 15000L,
+                    amount = "1000"
                 ),
                 TransactionUiModel(
                     account = 1,
@@ -95,7 +97,8 @@ fun TransactionsScreenPreview() {
                     txKey = null,
                     block = 123457,
                     date = 1710001000,
-                    fee = 20000L
+                    fee = 20000L,
+                    amount = "2000"
                 )
             )
         )

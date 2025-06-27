@@ -16,7 +16,6 @@
 package com.m2049r.xmrwallet.service
 
 import android.content.Context
-import android.os.Process
 import androidx.annotation.WorkerThread
 import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.TxData

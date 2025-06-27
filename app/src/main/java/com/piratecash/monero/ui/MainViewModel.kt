@@ -194,6 +194,12 @@ class MainViewModel : ViewModel(), WalletService.Observer {
         val restoreHeight = getHeight(BuildConfig.RESTORE_HEIGHT)
         WalletManager.getInstance()
             .recoveryWallet(getWalletFullPath(), crazyPass, seed, "", restoreHeight)
+
+        val walletFolder: File = Helper.getWalletRoot(MyApplication.instance)
+        val walletFile = File(walletFolder, WALLET_NAME)
+        Timber.d("New Wallet %s", walletFile.absolutePath)
+        // NEXT line is VERY important for correct update
+        walletFile.delete() // when recovering wallets, the cache seems corrupt - so remove it
     }
     /*
         private fun openWallet() {
@@ -281,7 +287,8 @@ class MainViewModel : ViewModel(), WalletService.Observer {
                 txKey = tx.txKey,
                 block = tx.blockheight,
                 date = tx.timestamp,
-                fee = tx.fee
+                fee = tx.fee,
+                amount = Helper.getDisplayAmount(tx.amount, 5)
             )
         }
         uiState.value = uiState.value.copy(transactions = txs)
@@ -418,7 +425,8 @@ data class TransactionUiModel(
     val txKey: String?,
     val block: Long,
     val date: Long,
-    val fee: Long
+    val fee: Long,
+    val amount: String
 )
 
 data class MainUiState(
