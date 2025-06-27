@@ -16,43 +16,16 @@
 
 package com.m2049r.xmrwallet.util;
 
-import android.Manifest;
-import android.app.Activity;
-import android.app.Dialog;
-import android.content.ClipData;
-import android.content.ClipDescription;
-import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.VectorDrawable;
-import android.os.Build;
-import android.os.StrictMode;
 import android.system.ErrnoException;
 import android.system.Os;
-import android.view.View;
-import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
-
-import androidx.core.content.ContextCompat;
 
 import com.m2049r.xmrwallet.model.WalletManager;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.net.MalformedURLException;
-import java.net.SocketTimeoutException;
-import java.net.URL;
 import java.util.Locale;
-
-import javax.net.ssl.HttpsURLConnection;
 
 import timber.log.Timber;
 
@@ -88,55 +61,11 @@ public class Helper {
         return dir;
     }
 
-    static public final int PERMISSIONS_REQUEST_CAMERA = 7;
-
-    static public boolean getCameraPermission(Activity context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (context.checkSelfPermission(Manifest.permission.CAMERA)
-                    == PackageManager.PERMISSION_DENIED) {
-                Timber.w("Permission denied for CAMERA - requesting it");
-                String[] permissions = {Manifest.permission.CAMERA};
-                context.requestPermissions(permissions, PERMISSIONS_REQUEST_CAMERA);
-                return false;
-            } else {
-                return true;
-            }
-        } else {
-            return true;
-        }
-    }
-
     static public File getWalletFile(Context context, String aWalletName) {
         File walletDir = getWalletRoot(context);
         File f = new File(walletDir, aWalletName);
         Timber.d("wallet=%s size= %d", f.getAbsolutePath(), f.length());
         return f;
-    }
-
-    static public void showKeyboard(Activity act) {
-        InputMethodManager imm = (InputMethodManager) act.getSystemService(Context.INPUT_METHOD_SERVICE);
-        final View focus = act.getCurrentFocus();
-        if (focus != null)
-            imm.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT);
-    }
-
-    static public void hideKeyboard(Activity act) {
-        if (act == null) return;
-        if (act.getCurrentFocus() == null) {
-            act.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
-        } else {
-            InputMethodManager imm = (InputMethodManager) act.getSystemService(Context.INPUT_METHOD_SERVICE);
-            imm.hideSoftInputFromWindow((null == act.getCurrentFocus()) ? null : act.getCurrentFocus().getWindowToken(),
-                    InputMethodManager.HIDE_NOT_ALWAYS);
-        }
-    }
-
-    static public void showKeyboard(Dialog dialog) {
-        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-    }
-
-    static public void hideKeyboardAlways(Activity act) {
-        act.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
     }
 
     static public BigDecimal getDecimalAmount(long amount) {
@@ -182,82 +111,6 @@ public class Helper {
             d = d.setScale(1, BigDecimal.ROUND_UNNECESSARY);
         return d.toPlainString();
     }
-
-    static public Bitmap getBitmap(Context context, int drawableId) {
-        Drawable drawable = ContextCompat.getDrawable(context, drawableId);
-        if (drawable instanceof BitmapDrawable) {
-            return BitmapFactory.decodeResource(context.getResources(), drawableId);
-        } else if (drawable instanceof VectorDrawable) {
-            return getBitmap((VectorDrawable) drawable);
-        } else {
-            throw new IllegalArgumentException("unsupported drawable type");
-        }
-    }
-
-    static private Bitmap getBitmap(VectorDrawable vectorDrawable) {
-        Bitmap bitmap = Bitmap.createBitmap(vectorDrawable.getIntrinsicWidth(),
-                vectorDrawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        vectorDrawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-        vectorDrawable.draw(canvas);
-        return bitmap;
-    }
-
-    static final int HTTP_TIMEOUT = 5000;
-
-    static public String getUrl(String httpsUrl) {
-        HttpsURLConnection urlConnection = null;
-        try {
-            URL url = new URL(httpsUrl);
-            urlConnection = (HttpsURLConnection) url.openConnection();
-            urlConnection.setConnectTimeout(HTTP_TIMEOUT);
-            urlConnection.setReadTimeout(HTTP_TIMEOUT);
-            InputStreamReader in = new InputStreamReader(urlConnection.getInputStream());
-            StringBuffer sb = new StringBuffer();
-            final int BUFFER_SIZE = 512;
-            char[] buffer = new char[BUFFER_SIZE];
-            int length = in.read(buffer, 0, BUFFER_SIZE);
-            while (length >= 0) {
-                sb.append(buffer, 0, length);
-                length = in.read(buffer, 0, BUFFER_SIZE);
-            }
-            return sb.toString();
-        } catch (SocketTimeoutException ex) {
-            Timber.w("C %s", ex.getLocalizedMessage());
-        } catch (MalformedURLException ex) {
-            Timber.e("A %s", ex.getLocalizedMessage());
-        } catch (IOException ex) {
-            Timber.e("B %s", ex.getLocalizedMessage());
-        } finally {
-            if (urlConnection != null) {
-                urlConnection.disconnect();
-            }
-        }
-        return null;
-    }
-
-    static public void clipBoardCopy(Context context, String label, String text) {
-        ClipboardManager clipboardManager = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-        ClipData clip = ClipData.newPlainText(label, text);
-        clipboardManager.setPrimaryClip(clip);
-    }
-
-    static public String getClipBoardText(Context context) {
-        final ClipboardManager clipboardManager = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-        try {
-            if (clipboardManager.hasPrimaryClip()
-                    && clipboardManager.getPrimaryClipDescription().hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)) {
-                final ClipData.Item item = clipboardManager.getPrimaryClip().getItemAt(0);
-                return item.getText().toString();
-            }
-        } catch (NullPointerException ex) {
-            // if we have don't find a text in the clipboard
-            return null;
-        }
-        return null;
-    }
-
-    private final static char[] HexArray = "0123456789ABCDEF".toCharArray();
 
     public static String bytesToHex(byte[] data) {
         if ((data != null) && (data.length > 0))
@@ -335,37 +188,5 @@ public class Helper {
         }
 
         return null;
-    }
-
-    public interface PasswordAction {
-        void act(String walletName, String password, boolean fingerprintUsed);
-
-        void fail(String walletName);
-    }
-
-    static private boolean processPasswordEntry(Context context, String walletName, String pass, boolean fingerprintUsed, PasswordAction action) {
-        String walletPassword = Helper.getWalletPassword(context, walletName, pass);
-        if (walletPassword != null) {
-            action.act(walletName, walletPassword, fingerprintUsed);
-            return true;
-        } else {
-            action.fail(walletName);
-            return false;
-        }
-    }
-
-    public interface Action {
-        boolean run();
-    }
-
-    static public boolean runWithNetwork(Action action) {
-        StrictMode.ThreadPolicy currentPolicy = StrictMode.getThreadPolicy();
-        StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
-        StrictMode.setThreadPolicy(policy);
-        try {
-            return action.run();
-        } finally {
-            StrictMode.setThreadPolicy(currentPolicy);
-        }
     }
 }
