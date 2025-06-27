@@ -63,10 +63,6 @@
 - `app/` — demo Compose application
 - `monerokit/` — Monero library (JNI, Java/Kotlin wrappers)
 
-## License
-
-> _Specify your project license here_
-
 ## Author
 
 - PirateCash Team, based on [Monerujo](https://github.com/m2049r/xmrwallet) 
