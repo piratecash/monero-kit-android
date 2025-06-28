@@ -89,24 +89,16 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
             override fun connected() {
                 Timber.d("CONNECTED")
                 WalletManager.getInstance().setProxy(NetCipherHelper.getProxy())
-                /*torNotify()
-                if (waitingUiTask != null) {
-                    Timber.d("RUN")
-                    runOnUiThread(waitingUiTask)
-                    waitingUiTask = null
-                }*/
             }
 
             override fun disconnected() {
                 Timber.d("DISCONNECTED")
                 WalletManager.getInstance().setProxy("")
-//                torNotify()
             }
 
             override fun notInstalled() {
                 Timber.d("NOT INSTALLED")
                 WalletManager.getInstance().setProxy("")
-//                torNotify()
             }
 
             override fun notEnabled() {
@@ -114,7 +106,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
                 notInstalled()
             }
         })
-//        NetCipherHelper.getInstance().createClearnetClient()
 
         if (!isWalletFilesExist(MyApplication.Companion.instance, WALLET_NAME)) {
             createWallet()
@@ -124,14 +115,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
         walletService.setObserver(this)
 
 //        walletService.stop() - must be called in the end
-
-        /*        if (isWalletFilesExist(MyApplication.instance, WALLET_NAME)) {
-                    openWallet()
-                } else {
-                    createWallet()
-                }
-                wallet.setListener(this)*/
-//        updateUIState()
     }
 
     fun onStartClick() {
@@ -147,14 +130,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
                 address = walletService.wallet?.address ?: ""
             )
         }
-        /*viewModelScope.launch(Dispatchers.IO) {
-//            val fastestNode = NodePinger.findFirstRespondingNodeAsync(getNodes())
-//            if (fastestNode == null) return@launch
-            val fastestNode = NodeInfo.fromString(DefaultNodes.MONERUJO.getUri())
-            WalletManager.getInstance().setDaemon(fastestNode)
-            wallet.init(0)
-            wallet.startRefresh()
-        }*/
     }
 
     fun clearWallet() {
@@ -202,12 +177,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
         // NEXT line is VERY important for correct update
         walletFile.delete() // when recovering wallets, the cache seems corrupt - so remove it
     }
-    /*
-        private fun openWallet() {
-            val walletPassword = Helper.getWalletPassword(MyApplication.instance, WALLET_NAME, "")
-            wallet = WalletManager.getInstance()
-                .openWallet(getWalletFullPath().absolutePath, walletPassword)
-        }*/
 
     /***
      * @param dateOrHeight - YYYY-MM-DD or height
