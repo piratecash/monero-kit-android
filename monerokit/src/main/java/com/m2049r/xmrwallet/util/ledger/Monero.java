@@ -20,10 +20,15 @@
 
 package com.m2049r.xmrwallet.util.ledger;
 
+import com.theromus.sha.Keccak;
+import com.theromus.sha.Parameters;
+
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.security.spec.ECPoint;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
 import java.text.Normalizer;
@@ -37,7 +42,28 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
+import timber.log.Timber;
+
 public class Monero {
+
+    static public String convert(String mnemonic, String passphrase) {
+        String[] words = mnemonic.toLowerCase().split("\\s");
+        StringBuilder normalizedMnemonic = new StringBuilder();
+        int wordCount = 0;
+        for (String word : words) {
+            if (word.length() == 0) continue;
+            if (wordCount > 0) normalizedMnemonic.append(" ");
+            wordCount++;
+            normalizedMnemonic.append(word);
+        }
+        if ((wordCount != 12) && (wordCount != 24) && (wordCount != 18)) return null;
+        Monero seed = new Monero();
+        try {
+            return seed.getMnemonic(normalizedMnemonic.toString(), passphrase);
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            return null;
+        }
+    }
 
     private byte[] seed;
     private byte[] mkey;
@@ -78,6 +104,56 @@ public class Monero {
         }
     }
 
+    private void derive(String path)
+            throws NoSuchAlgorithmException, InvalidKeyException {
+        byte[] kpar = Arrays.copyOf(mkey, 32);
+        byte[] cpar = Arrays.copyOf(mchain, 32);
+
+        String[] pathSegments = path.split("/");
+        if (!pathSegments[0].equals("m"))
+            throw new IllegalArgumentException("Path must start with 'm'");
+        for (int i = 1; i < pathSegments.length; i++) {
+            String child = pathSegments[i];
+            boolean hardened = child.charAt(child.length() - 1) == '\'';
+
+            byte[] data = new byte[33 + 4];
+            if (hardened) {
+                int c = Integer.parseInt(child.substring(0, child.length() - 1));
+                c += 0x80000000;
+                data[0] = 0;
+                System.arraycopy(kpar, 0, data, 1, kpar.length);
+                System.arraycopy(intToBytes(c, 4), 0, data, 1 + kpar.length, 4);
+            } else {
+                int c = Integer.parseInt(child);
+                BigInteger k = new BigInteger(1, kpar);
+                ECPoint kG = ECsecp256k1.scalmult(k, ECsecp256k1.G);
+                byte[] xBytes = fixByteArray32(kG.getAffineX().toByteArray());
+                byte[] Wpar = new byte[33];
+                System.arraycopy(xBytes, 0, Wpar, 33 - xBytes.length, xBytes.length);
+                byte[] yBytes = fixByteArray32(kG.getAffineY().toByteArray());
+                if ((yBytes[yBytes.length - 1] & 1) == 0)
+                    Wpar[0] = 0x02;
+                else
+                    Wpar[0] = 0x03;
+                System.arraycopy(Wpar, 0, data, 0, Wpar.length);
+                System.arraycopy(intToBytes(c, 4), 0, data, Wpar.length, 4);
+            }
+
+            SecretKeySpec keySpec = new SecretKeySpec(cpar, "HmacSHA512");
+            Mac mac = Mac.getInstance("HmacSHA512");
+            mac.init(keySpec);
+            byte[] I = mac.doFinal(data);
+            BigInteger Il = new BigInteger(1, Arrays.copyOfRange(I, 0, 32));
+            BigInteger kparInt = new BigInteger(1, kpar);
+            Il = Il.add(kparInt).mod(ECsecp256k1.n);
+            byte[] IlBytes = fixByteArray32(Il.toByteArray());
+            kpar = new byte[32];
+            System.arraycopy(IlBytes, 0, kpar, 0, 32);
+            System.arraycopy(I, 32, cpar, 0, I.length - 32);
+        }
+        monero_ki = kpar;
+        monero_ci = cpar;
+    }
 
     private void makeSeed(String mnemonic, String passphrase)
             throws NoSuchAlgorithmException, InvalidKeySpecException {
@@ -98,6 +174,20 @@ public class Monero {
         mchain = Arrays.copyOfRange(result, 32, 64);
     }
 
+    private void makeKeys() {
+        BigInteger l = new BigInteger("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed", 16);
+        Keccak keccak = new Keccak();
+        final byte[] b = keccak.getHash(monero_ki, Parameters.KECCAK_256);
+        reverse(b);
+        BigInteger ble = new BigInteger(1, b).mod(l);
+        spend_key = fixByteArray32(ble.toByteArray());
+        reverse(spend_key);
+        byte[] a = keccak.getHash(spend_key, Parameters.KECCAK_256);
+        reverse(a);
+        BigInteger ale = new BigInteger(1, a).mod(l);
+        view_key = fixByteArray32(ale.toByteArray());
+        reverse(view_key);
+    }
 
     private String getWords() {
         if (spend_key.length != 32) throw new IllegalArgumentException();
@@ -129,6 +219,19 @@ public class Monero {
         long checksum = crc32.getValue();
         mnemonic.append(words.get((int) (checksum % 24)));
         return mnemonic.toString();
+    }
+
+    private String getMnemonic(String ledgerMnemonic, String passphrase) {
+        try {
+            makeSeed(ledgerMnemonic, passphrase);
+            makeMasterKey();
+            derive("m/44'/128'/0'/0/0");
+            makeKeys();
+            return getWords();
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException | InvalidKeyException ex) {
+            Timber.e(ex);
+        }
+        return null;
     }
 
     public static final int ENGLISH_PREFIX_LENGTH = 3;
