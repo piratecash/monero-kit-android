@@ -101,7 +101,10 @@ class MoneroWalletService(private val appContext: Context) {
         override fun refreshed() { // this means it's synced
             Timber.d("refreshed()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("refreshed() wallet is null")
+                return
+            }
             wallet.setSynchronized()
             if (updated) {
                 updateDaemonState(wallet, wallet.getBlockChainHeight())
