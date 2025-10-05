@@ -36,7 +36,11 @@ class MoneroWalletService(private val appContext: Context) {
         fun start() {
             Timber.d("MyWalletListener.start()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("MyWalletListener.start() wallet is null")
+                return
+            }
+
             wallet.setListener(this)
             wallet.startRefresh()
         }
@@ -44,7 +48,10 @@ class MoneroWalletService(private val appContext: Context) {
         fun stop() {
             Timber.d("MyWalletListener.stop()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if(wallet == null) {
+                Timber.d("MyWalletListener.stop() wallet is null")
+                return
+            }
             wallet.pauseRefresh()
             wallet.setListener(null)
         }
@@ -67,7 +74,10 @@ class MoneroWalletService(private val appContext: Context) {
 
         override fun newBlock(height: Long) {
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("newBlock() wallet is null")
+                return
+            }
             // don't flood with an update for every block ...
             if (lastBlockTime < System.currentTimeMillis() - 2000) {
                 lastBlockTime = System.currentTimeMillis()
@@ -94,7 +104,10 @@ class MoneroWalletService(private val appContext: Context) {
         override fun updated() {
             Timber.d("updated()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("updated() wallet is null")
+                return
+            }
             updated = true
         }
 
