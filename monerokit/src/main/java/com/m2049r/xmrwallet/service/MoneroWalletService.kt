@@ -360,7 +360,11 @@ class MoneroWalletService(private val appContext: Context) {
         if (wallet != null) {
             Timber.d("Using daemon %s", WalletManager.getInstance().getDaemonAddress())
             showProgress(55)
-            wallet.init(0)
+            if (!wallet.init(0)) {
+                Timber.e("wallet.init failed")
+                wallet.close()
+                return null
+            }
             wallet.setProxy(NetCipherHelper.getProxy())
             showProgress(90)
         }
