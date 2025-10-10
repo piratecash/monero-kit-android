@@ -391,6 +391,9 @@ class MoneroWalletService(private val appContext: Context) {
             if (!walletStatus.isOk()) {
                 Timber.d("wallet status is %s", walletStatus)
                 WalletManager.getInstance().close(wallet) // TODO close() failed?
+                if (walletStatus.status == Wallet.StatusEnum.Status_Critical) {
+                    throw WalletCorruptedException(walletStatus.errorString)
+                }
                 wallet = null
                 // TODO what do we do with the progress??
                 // TODO tell the activity this failed
