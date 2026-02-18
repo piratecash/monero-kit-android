@@ -9,6 +9,7 @@ plugins {
 android {
     namespace = "com.piratecash.monero"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         minSdk = 27
@@ -16,14 +17,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
 
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++11"
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            jniLibs.srcDirs("src/main/jniLibs")
+    externalNativeBuild {
+        cmake {
+            path = file("CMakeLists.txt")
         }
     }
 

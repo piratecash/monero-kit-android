@@ -15,6 +15,7 @@
  */
 
 #include <inttypes.h>
+#include <cassert>
 #include "monerujo.h"
 #include "wallet2_api.h"
 
