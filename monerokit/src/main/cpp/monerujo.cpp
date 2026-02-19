@@ -691,8 +691,12 @@ Java_com_m2049r_xmrwallet_model_Wallet_getSecretSpendKey(JNIEnv *env, jobject in
 JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_store(JNIEnv *env, jobject instance,
                                              jstring path) {
-    const char *_path = env->GetStringUTFChars(path, nullptr);
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("store() wallet is null");
+        return static_cast<jboolean>(false);
+    }
+    const char *_path = env->GetStringUTFChars(path, nullptr);
     bool success = wallet->store(std::string(_path));
     if (!success) {
         LOGE("store() %s", wallet->errorString().c_str());
