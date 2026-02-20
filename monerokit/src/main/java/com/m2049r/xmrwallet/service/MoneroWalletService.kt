@@ -249,13 +249,14 @@ class MoneroWalletService(private val appContext: Context) {
     fun stop(saveWallet: Boolean = true) {
         Timber.d("stop()")
 
-        if(saveWallet) {
-            storeWallet()
-        }
-
         setObserver(null) // in case it was not reset already
         if (listener != null) {
             listener?.stop()
+            // Store after pausing refresh — storing while the refresh thread
+            // is running causes a crash (concurrent modification of hash chain).
+            if (saveWallet) {
+                storeWallet()
+            }
             val myWallet = wallet
             Timber.d("stop() closing")
             myWallet?.close()
