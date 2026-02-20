@@ -53,7 +53,10 @@ class MoneroWalletService(private val appContext: Context) {
                 return
             }
             wallet.pauseRefresh()
-            wallet.setListener(null)
+            // Don't clear the listener here — the native refresh thread may still be
+            // inside fast_refresh() and could callback into a null listener.
+            // wallet.close() → closeWallet() joins the refresh thread first,
+            // then the JNI layer safely cleans up the listener.
         }
 
         // WalletListener callbacks
