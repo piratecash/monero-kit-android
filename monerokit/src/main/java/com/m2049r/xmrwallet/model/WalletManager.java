@@ -187,7 +187,12 @@ public class WalletManager {
     public native boolean closeJ(Wallet wallet);
 
     public boolean close(Wallet wallet) {
-        unmanageWallet(wallet);
+        try {
+            unmanageWallet(wallet);
+        } catch (Exception ex) {
+            Timber.tag("Monero").e(ex, "Could not unmanage wallet");
+            // we try to close it anyway
+        }
         boolean closed = closeJ(wallet);
         if (!closed) {
             // in case we could not close it

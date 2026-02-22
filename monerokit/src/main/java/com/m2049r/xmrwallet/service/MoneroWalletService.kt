@@ -36,7 +36,11 @@ class MoneroWalletService(private val appContext: Context) {
         fun start() {
             Timber.d("MyWalletListener.start()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("MyWalletListener.start() wallet is null")
+                return
+            }
+
             wallet.setListener(this)
             wallet.startRefresh()
         }
@@ -44,9 +48,15 @@ class MoneroWalletService(private val appContext: Context) {
         fun stop() {
             Timber.d("MyWalletListener.stop()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if(wallet == null) {
+                Timber.d("MyWalletListener.stop() wallet is null")
+                return
+            }
             wallet.pauseRefresh()
-            wallet.setListener(null)
+            // Don't clear the listener here — the native refresh thread may still be
+            // inside fast_refresh() and could callback into a null listener.
+            // wallet.close() → closeWallet() joins the refresh thread first,
+            // then the JNI layer safely cleans up the listener.
         }
 
         // WalletListener callbacks
@@ -67,7 +77,10 @@ class MoneroWalletService(private val appContext: Context) {
 
         override fun newBlock(height: Long) {
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("newBlock() wallet is null")
+                return
+            }
             // don't flood with an update for every block ...
             if (lastBlockTime < System.currentTimeMillis() - 2000) {
                 lastBlockTime = System.currentTimeMillis()
@@ -94,7 +107,10 @@ class MoneroWalletService(private val appContext: Context) {
         override fun updated() {
             Timber.d("updated()")
             val wallet: Wallet? = wallet
-            checkNotNull(wallet) { "No wallet!" }
+            if (wallet == null) {
+                Timber.d("updated() wallet is null")
+                return
+            }
             updated = true
         }
 
@@ -233,13 +249,14 @@ class MoneroWalletService(private val appContext: Context) {
     fun stop(saveWallet: Boolean = true) {
         Timber.d("stop()")
 
-        if(saveWallet) {
-            storeWallet()
-        }
-
         setObserver(null) // in case it was not reset already
         if (listener != null) {
             listener?.stop()
+            // Store after pausing refresh — storing while the refresh thread
+            // is running causes a crash (concurrent modification of hash chain).
+            if (saveWallet) {
+                storeWallet()
+            }
             val myWallet = wallet
             Timber.d("stop() closing")
             myWallet?.close()
@@ -347,7 +364,11 @@ class MoneroWalletService(private val appContext: Context) {
         if (wallet != null) {
             Timber.d("Using daemon %s", WalletManager.getInstance().getDaemonAddress())
             showProgress(55)
-            wallet.init(0)
+            if (!wallet.init(0)) {
+                Timber.e("wallet.init failed")
+                wallet.close()
+                return null
+            }
             wallet.setProxy(NetCipherHelper.getProxy())
             showProgress(90)
         }
@@ -374,6 +395,9 @@ class MoneroWalletService(private val appContext: Context) {
             if (!walletStatus.isOk()) {
                 Timber.d("wallet status is %s", walletStatus)
                 WalletManager.getInstance().close(wallet) // TODO close() failed?
+                if (walletStatus.status == Wallet.StatusEnum.Status_Critical) {
+                    throw WalletCorruptedException(walletStatus.errorString)
+                }
                 wallet = null
                 // TODO what do we do with the progress??
                 // TODO tell the activity this failed

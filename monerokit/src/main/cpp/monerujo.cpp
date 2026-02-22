@@ -15,6 +15,7 @@
  */
 
 #include <inttypes.h>
+#include <cassert>
 #include "monerujo.h"
 #include "wallet2_api.h"
 
@@ -566,6 +567,8 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
             walletListener->deleteGlobalJavaRef(env);
             delete walletListener;
         }
+        env->SetLongField(walletInstance, getHandleField(env, walletInstance, "listenerHandle"), 0);
+        env->SetLongField(walletInstance, getHandleField(env, walletInstance), 0);
     }
     LOGD("wallet closed");
     return static_cast<jboolean>(closeSuccess);
@@ -688,8 +691,12 @@ Java_com_m2049r_xmrwallet_model_Wallet_getSecretSpendKey(JNIEnv *env, jobject in
 JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_store(JNIEnv *env, jobject instance,
                                              jstring path) {
-    const char *_path = env->GetStringUTFChars(path, nullptr);
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("store() wallet is null");
+        return static_cast<jboolean>(false);
+    }
+    const char *_path = env->GetStringUTFChars(path, nullptr);
     bool success = wallet->store(std::string(_path));
     if (!success) {
         LOGE("store() %s", wallet->errorString().c_str());
@@ -1129,22 +1136,23 @@ JNIEXPORT jlong JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_setListenerJ(JNIEnv *env, jobject instance,
                                                     jobject javaListener) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    wallet->setListener(nullptr); // clear old listener
-    // delete old listener
+    // delete old listener first (safe even if wallet is null)
     MyWalletListener *oldListener = getHandle<MyWalletListener>(env, instance,
                                                                 "listenerHandle");
     if (oldListener != nullptr) {
+        if (wallet != nullptr) {
+            wallet->setListener(nullptr);
+        }
         oldListener->deleteGlobalJavaRef(env);
         delete oldListener;
     }
-    if (javaListener == nullptr) {
-        LOGD("null listener");
+    if (wallet == nullptr || javaListener == nullptr) {
+        LOGD("setListenerJ: wallet=%p javaListener=%p", wallet, javaListener);
         return 0;
-    } else {
-        MyWalletListener *listener = new MyWalletListener(env, javaListener);
-        wallet->setListener(listener);
-        return reinterpret_cast<jlong>(listener);
     }
+    MyWalletListener *listener = new MyWalletListener(env, javaListener);
+    wallet->setListener(listener);
+    return reinterpret_cast<jlong>(listener);
 }
 
 JNIEXPORT jint JNICALL
