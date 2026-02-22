@@ -184,22 +184,26 @@ public class WalletManager {
                                                 String subaddressLookahead);
 
 
-    public native boolean closeJ(Wallet wallet);
+    public native boolean closeJ(Wallet wallet, boolean store);
 
-    public boolean close(Wallet wallet) {
+    public boolean close(Wallet wallet, boolean store) {
         try {
             unmanageWallet(wallet);
         } catch (Exception ex) {
             Timber.tag("Monero").e(ex, "Could not unmanage wallet");
             // we try to close it anyway
         }
-        boolean closed = closeJ(wallet);
+        boolean closed = closeJ(wallet, store);
         if (!closed) {
             // in case we could not close it
             // we manage it again
             manageWallet(wallet);
         }
         return closed;
+    }
+
+    public boolean close(Wallet wallet) {
+        return close(wallet, false);
     }
 
     public boolean walletExists(File aFile) {

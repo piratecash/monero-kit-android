@@ -556,10 +556,11 @@ Java_com_m2049r_xmrwallet_model_WalletManager_setProxy(JNIEnv *env, jobject inst
 
 JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instance,
-                                                     jobject walletInstance) {
+                                                     jobject walletInstance,
+                                                     jboolean store) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, walletInstance);
     bool closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet,
-                                                                                      false);
+                                                                                      store);
     if (closeSuccess) {
         MyWalletListener *walletListener = getHandle<MyWalletListener>(env, walletInstance,
                                                                        "listenerHandle");

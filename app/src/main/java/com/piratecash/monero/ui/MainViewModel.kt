@@ -358,10 +358,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
         )
     }
 
-    override fun onWalletStored(success: Boolean) {
-        Log.d(TAG, "onWalletStored() called with: success = $success")
-    }
-
     override fun onTransactionCreated(
         tag: String?,
         pendingTransaction: PendingTransaction?

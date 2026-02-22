@@ -205,9 +205,13 @@ public class Wallet {
 
     public native synchronized boolean store(String path);
 
-    public boolean close() {
+    public boolean close(boolean store) {
         disposePendingTransaction();
-        return WalletManager.getInstance().close(this);
+        return WalletManager.getInstance().close(this, store);
+    }
+
+    public boolean close() {
+        return close(false);
     }
 
     public native String getFilename();

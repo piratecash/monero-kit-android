@@ -176,8 +176,6 @@ class MoneroWalletService(private val appContext: Context) {
 
         fun onProgress(n: Int)
 
-        fun onWalletStored(success: Boolean)
-
         fun onTransactionCreated(tag: String?, pendingTransaction: PendingTransaction?)
 
         fun onTransactionSent(txid: String?)
@@ -252,24 +250,15 @@ class MoneroWalletService(private val appContext: Context) {
         setObserver(null) // in case it was not reset already
         if (listener != null) {
             listener?.stop()
-            // Store after pausing refresh — storing while the refresh thread
-            // is running causes a crash (concurrent modification of hash chain).
-            if (saveWallet) {
-                storeWallet()
-            }
             val myWallet = wallet
             Timber.d("stop() closing")
-            myWallet?.close()
+            // close(store=true) joins the refresh thread first, then stores atomically —
+            // no race between the refresh thread and store().
+            myWallet?.close(saveWallet)
             Timber.d("stop() closed")
             listener = null
         }
         running = false
-    }
-
-    fun storeWallet() {
-        wallet?.store()?.let {
-            observer?.onWalletStored(it)
-        }
     }
 
     fun sweep(txTag: String) {
@@ -348,7 +337,6 @@ class MoneroWalletService(private val appContext: Context) {
                     myWallet.status.errorString
                 )
             }
-            observer?.onWalletStored(rc)
             listener?.updated = true
         } else {
             val error = pendingTransaction.getErrorString()
