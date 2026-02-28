@@ -29,6 +29,8 @@ import timber.log.Timber
 
 class MoneroWalletService(private val appContext: Context) {
     private var listener: MyWalletListener? = null
+    @Volatile
+    private var isStopping = false
 
     private inner class MyWalletListener : WalletListener {
         var updated: Boolean = true
@@ -61,14 +63,17 @@ class MoneroWalletService(private val appContext: Context) {
 
         // WalletListener callbacks
         override fun moneySpent(txId: String?, amount: Long) {
+            if (isStopping) return
             Timber.d("moneySpent() %d @ %s", amount, txId)
         }
 
         override fun moneyReceived(txId: String?, amount: Long) {
+            if (isStopping) return
             Timber.d("moneyReceived() %d @ %s", amount, txId)
         }
 
         override fun unconfirmedMoneyReceived(txId: String?, amount: Long) {
+            if (isStopping) return
             Timber.d("unconfirmedMoneyReceived() %d @ %s", amount, txId)
         }
 
@@ -76,6 +81,7 @@ class MoneroWalletService(private val appContext: Context) {
         private var lastTxCount = 0
 
         override fun newBlock(height: Long) {
+            if (isStopping) return
             val wallet: Wallet? = wallet
             if (wallet == null) {
                 Timber.d("newBlock() wallet is null")
@@ -105,6 +111,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         override fun updated() {
+            if (isStopping) return
             Timber.d("updated()")
             val wallet: Wallet? = wallet
             if (wallet == null) {
@@ -115,6 +122,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         override fun refreshed() { // this means it's synced
+            if (isStopping) return
             Timber.d("refreshed()")
             val wallet: Wallet? = wallet
             if (wallet == null) {
@@ -207,6 +215,7 @@ class MoneroWalletService(private val appContext: Context) {
     private var errorState = false
 
     fun start(walletName: String?, walletPassword: String?): Wallet.Status? {
+        isStopping = false
         running = true
         Timber.d("start()")
 
@@ -245,6 +254,7 @@ class MoneroWalletService(private val appContext: Context) {
      */
     @WorkerThread
     fun stop(saveWallet: Boolean = true) {
+        isStopping = true
         Timber.d("stop()")
 
         setObserver(null) // in case it was not reset already
@@ -259,6 +269,7 @@ class MoneroWalletService(private val appContext: Context) {
             listener = null
         }
         running = false
+        isStopping = false
     }
 
     fun sweep(txTag: String) {

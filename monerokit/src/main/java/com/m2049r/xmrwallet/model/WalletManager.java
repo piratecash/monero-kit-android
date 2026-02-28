@@ -68,7 +68,7 @@ public class WalletManager {
         }
     }
 
-    private Wallet managedWallet = null;
+    private volatile Wallet managedWallet = null;
 
     @Nullable
     public Wallet getWallet() {
@@ -191,12 +191,9 @@ public class WalletManager {
             unmanageWallet(wallet);
         } catch (Exception ex) {
             Timber.tag("Monero").e(ex, "Could not unmanage wallet");
-            // we try to close it anyway
         }
         boolean closed = closeJ(wallet, store);
         if (!closed) {
-            // in case we could not close it
-            // we manage it again
             manageWallet(wallet);
         }
         return closed;
