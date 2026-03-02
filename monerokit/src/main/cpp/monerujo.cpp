@@ -821,7 +821,12 @@ Java_com_m2049r_xmrwallet_model_Wallet_getConnectionStatusJ(JNIEnv *env, jobject
         LOGE("wallet handle is null in %s", __FUNCTION__);
         return 0;
     }
-    return wallet->connected();
+    try {
+        return wallet->connected();
+    } catch (const std::exception &e) {
+        LOGE("getConnectionStatusJ: caught exception: %s", e.what());
+        return 0; // ConnectionStatus_Disconnected
+    }
 }
 //TODO virtual void setTrustedDaemon(bool arg) = 0;
 //TODO virtual bool trustedDaemon() const = 0;
