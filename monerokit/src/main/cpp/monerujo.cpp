@@ -16,8 +16,82 @@
 
 #include <inttypes.h>
 #include <cassert>
+#include <signal.h>
+#include <setjmp.h>
 #include "monerujo.h"
 #include "wallet2_api.h"
+
+// ---------------------------------------------------------------------------
+// Signal-safe wallet close
+//
+// wallet2::store() -> get_cache_file_data() -> hashchain serialization may
+// SIGSEGV when the wallet's internal deque<crypto::hash> has a null block
+// pointer (wallet opened but never completed a full sync cycle). SIGSEGV is a
+// hardware signal, not a C++ exception — try/catch cannot intercept it. We use
+// sigsetjmp/siglongjmp with SA_ONSTACK to survive the fault.
+//
+// Design notes:
+//  - The handler is installed ONCE in JNI_OnLoad (not per closeJ call) to
+//    avoid install/uninstall races between threads competing on a process-wide
+//    sigaction. g_prev_sigsegv_sa is a global captured at load time.
+//  - g_in_safe_close and g_close_jmpbuf are thread_local so each thread
+//    independently decides whether to recover or chain to the previous handler.
+//  - On recovery we intentionally leak the wallet2 object: its state is
+//    undefined after the fault and its destructor would hit the same null
+//    pointer. Internal mutexes left locked inside wallet2 are also leaked but
+//    are unreachable once the JNI handle is zeroed. This is an intentional
+//    trade-off (bounded leak vs. process death). The proper fix belongs in
+//    upstream Monero wallet2.cpp — add null-guards before hashchain serialization.
+//  - g_safe_close_ready gates closeJ: if setup failed we fall back to
+//    closeWallet(wallet, false) — losing the save is safer than crashing without
+//    the signal protection in place.
+// ---------------------------------------------------------------------------
+
+static struct sigaction               g_prev_sigsegv_sa;      // global, set once in JNI_OnLoad
+static bool                           g_safe_close_ready = false; // handler + altstack installed
+
+static thread_local char              g_close_altstack[65536]; // per-thread alternate signal stack
+static thread_local bool              g_altstack_ready   = false;
+static thread_local sigjmp_buf        g_close_jmpbuf;
+static thread_local volatile sig_atomic_t g_in_safe_close = 0;
+
+static void safe_close_sigsegv_handler(int sig, siginfo_t *info, void *ctx) {
+    if (g_in_safe_close) {
+        siglongjmp(g_close_jmpbuf, 1);
+    }
+    // Foreign SIGSEGV (not from our protected section) — chain to previous handler.
+    //
+    // For SA_SIGINFO handlers (e.g. the JVM, which uses SIGSEGV for Java NPE
+    // recovery): call the function pointer directly so our handler stays installed.
+    // Using sigaction+raise would uninstall us, breaking protection for all future
+    // closeJ calls after any Java NPE — a very common occurrence.
+    //
+    // For SIG_DFL: restore and raise — the process will crash regardless, so
+    // losing our handler installation doesn't matter.
+    //
+    // Note: direct sa_sigaction call bypasses SA_RESETHAND/SA_NODEFER/mask
+    // semantics, but this is the standard pattern used by Breakpad and Firebase
+    // NDK for exactly this reason.
+    if (g_prev_sigsegv_sa.sa_flags & SA_SIGINFO) {
+        g_prev_sigsegv_sa.sa_sigaction(sig, info, ctx);
+    } else {
+        sigaction(SIGSEGV, &g_prev_sigsegv_sa, nullptr);
+        raise(SIGSEGV);
+    }
+}
+
+static void ensure_thread_altstack() {
+    if (g_altstack_ready) return;
+    stack_t ss;
+    ss.ss_sp    = g_close_altstack;
+    ss.ss_size  = sizeof(g_close_altstack);
+    ss.ss_flags = 0;
+    if (sigaltstack(&ss, nullptr) != 0) {
+        // Logged by the caller; g_altstack_ready stays false.
+        return;
+    }
+    g_altstack_ready = true;
+}
 
 #ifdef __cplusplus
 extern "C"
@@ -52,7 +126,19 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
     if (jvm->GetEnv(reinterpret_cast<void **>(&jenv), JNI_VERSION_1_6) != JNI_OK) {
         return -1;
     }
-    //LOGI("JNI_OnLoad ok");
+
+    // Install the SIGSEGV handler once, process-wide, at load time.
+    // Doing this here avoids per-call install/uninstall races in closeJ.
+    struct sigaction sa = {};
+    sa.sa_sigaction = safe_close_sigsegv_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    if (sigaction(SIGSEGV, &sa, &g_prev_sigsegv_sa) == 0) {
+        g_safe_close_ready = true;
+        LOGI("JNI_OnLoad: safe-close SIGSEGV handler installed");
+    } else {
+        LOGW("JNI_OnLoad: sigaction failed — closeWallet will run without SIGSEGV protection");
+    }
 
     class_ArrayList = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("java/util/ArrayList")));
@@ -559,9 +645,45 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
                                                      jobject walletInstance,
                                                      jboolean store) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, walletInstance);
-    bool closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet,
-                                                                                      store);
-    if (closeSuccess) {
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in closeJ");
+        return JNI_FALSE;
+    }
+
+    // If handler setup failed at load time, fall back to close without save
+    // so we don't crash unprotected.
+    jboolean safeStore = store;
+    if (store && !g_safe_close_ready) {
+        LOGW("closeJ: SIGSEGV handler not ready — closing without save to avoid unprotected crash");
+        safeStore = JNI_FALSE;
+    }
+
+    ensure_thread_altstack();
+    if (!g_altstack_ready) {
+        LOGW("closeJ: sigaltstack failed on this thread — SIGSEGV recovery may be unreliable");
+    }
+
+    bool closeSuccess = false;
+    bool sigsegvOccurred = false;
+
+    // sigsetjmp must be called first so g_close_jmpbuf is valid before we arm
+    // the handler. Setting g_in_safe_close = 1 before sigsetjmp would risk a
+    // siglongjmp into an uninitialised buffer if a SIGSEGV fired in that window.
+    if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
+        g_in_safe_close = 1;  // jmpbuf is now valid — arm the handler
+        closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, safeStore);
+        g_in_safe_close = 0;
+    } else {
+        g_in_safe_close = 0;
+        sigsegvOccurred = true;
+        LOGE("closeJ: SIGSEGV in closeWallet(store=%d) — leaking wallet object to prevent process death", (int) store);
+    }
+
+    if (closeSuccess || sigsegvOccurred) {
+        // On normal close: clean up listener and zero handles.
+        // On SIGSEGV: wallet2 state is undefined — do NOT touch it — but still
+        // clean up our own MyWalletListener and zero the handles so Java never
+        // tries to use the corrupted wallet again.
         MyWalletListener *walletListener = getHandle<MyWalletListener>(env, walletInstance,
                                                                        "listenerHandle");
         if (walletListener != nullptr) {
@@ -571,8 +693,12 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
         env->SetLongField(walletInstance, getHandleField(env, walletInstance, "listenerHandle"), 0);
         env->SetLongField(walletInstance, getHandleField(env, walletInstance), 0);
     }
-    LOGD("wallet closed");
-    return static_cast<jboolean>(closeSuccess);
+
+    // On SIGSEGV we return true: handles are already zeroed and listener cleaned up,
+    // so from Java's perspective the wallet is closed. Returning false would cause
+    // WalletManager.close() to call manageWallet() on the zeroed handle.
+    LOGD("wallet closed (success=%d sigsegv=%d)", closeSuccess, sigsegvOccurred);
+    return static_cast<jboolean>(closeSuccess || sigsegvOccurred);
 }
 
 
