@@ -1400,10 +1400,15 @@ Java_com_m2049r_xmrwallet_model_Wallet_estimateTransactionFee(JNIEnv *env, jobje
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
-        return 0;
+        return -1;
     }
 
-    return static_cast<jlong>(wallet->estimateTransactionFee(destinations, _priority));
+    try {
+        return static_cast<jlong>(wallet->estimateTransactionFee(destinations, _priority));
+    } catch (const std::exception &e) {
+        LOGE("estimateTransactionFee: caught exception: %s", e.what());
+        return -1;
+    }
 }
 
 //virtual bool exportKeyImages(const std::string &filename) = 0;
@@ -1689,8 +1694,11 @@ jobject newTransactionInfo(JNIEnv *env, Monero::TransactionInfo *info) {
     jstring _paymentId = env->NewStringUTF(info->paymentId().c_str());
     jstring _label = env->NewStringUTF(info->label().c_str());
     uint32_t subaddrIndex = 0;
-    if (info->direction() == Monero::TransactionInfo::Direction_In)
-        subaddrIndex = *(info->subaddrIndex().begin());
+    if (info->direction() == Monero::TransactionInfo::Direction_In) {
+        const auto &indices = info->subaddrIndex();
+        if (!indices.empty())
+            subaddrIndex = *indices.begin();
+    }
     jobject result = env->NewObject(class_TransactionInfo, c,
                                     info->direction(),
                                     info->isPending(),
@@ -1793,8 +1801,21 @@ Java_com_m2049r_xmrwallet_model_TransactionHistory_refreshJ(JNIEnv *env, jobject
                                                             jint accountIndex) {
     Monero::TransactionHistory *history = getHandle<Monero::TransactionHistory>(env,
                                                                                 instance);
-    history->refresh();
-    return transactionInfoArrayList(env, history->getAll(), (uint32_t) accountIndex);
+    if (history == nullptr) {
+        LOGE("history handle is null in %s", __FUNCTION__);
+        jclass class_ArrayList = env->FindClass("java/util/ArrayList");
+        jmethodID c = env->GetMethodID(class_ArrayList, "<init>", "()V");
+        return env->NewObject(class_ArrayList, c);
+    }
+    try {
+        history->refresh();
+        return transactionInfoArrayList(env, history->getAll(), (uint32_t) accountIndex);
+    } catch (const std::exception &e) {
+        LOGE("refreshJ: caught exception: %s", e.what());
+        jclass class_ArrayList = env->FindClass("java/util/ArrayList");
+        jmethodID c = env->GetMethodID(class_ArrayList, "<init>", "()V");
+        return env->NewObject(class_ArrayList, c);
+    }
 }
 
 // TransactionInfo is implemented in Java - no need here
