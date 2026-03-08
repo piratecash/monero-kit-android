@@ -45,9 +45,7 @@ jobs:
           if [ ! -d "gh-pages/.git" ]; then
             mkdir -p gh-pages
             cd gh-pages
-            git init
-            git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-            git checkout -b gh-pages
+            git init -b gh-pages
           fi
 
       - name: Copy artifacts to gh-pages
@@ -70,5 +68,6 @@ jobs:
           git add -A
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "Publish ${{ env.SHORT_SHA }}"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git remote remove origin 2>/dev/null || true
+          git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           git push --force origin gh-pages
