@@ -31,6 +31,8 @@ class MoneroWalletService(private val appContext: Context) {
     private var listener: MyWalletListener? = null
     @Volatile
     private var isStopping = false
+    @Volatile
+    private var isPaused = false
 
     private inner class MyWalletListener : WalletListener {
         var updated: Boolean = true
@@ -61,19 +63,32 @@ class MoneroWalletService(private val appContext: Context) {
             // then the JNI layer safely cleans up the listener.
         }
 
+        fun resume() {
+            Timber.d("MyWalletListener.resume()")
+            val wallet: Wallet? = wallet
+            if (wallet == null) {
+                Timber.d("MyWalletListener.resume() wallet is null")
+                return
+            }
+            // Only restart refresh — the listener is already attached from start().
+            // Do NOT call wallet.setListener(this) here to avoid native listener
+            // churn (each setListenerJ leaks the old native listener by design).
+            wallet.startRefresh()
+        }
+
         // WalletListener callbacks
         override fun moneySpent(txId: String?, amount: Long) {
-            if (isStopping) return
+            if (isStopping || isPaused) return
             Timber.d("moneySpent() %d @ %s", amount, txId)
         }
 
         override fun moneyReceived(txId: String?, amount: Long) {
-            if (isStopping) return
+            if (isStopping || isPaused) return
             Timber.d("moneyReceived() %d @ %s", amount, txId)
         }
 
         override fun unconfirmedMoneyReceived(txId: String?, amount: Long) {
-            if (isStopping) return
+            if (isStopping || isPaused) return
             Timber.d("unconfirmedMoneyReceived() %d @ %s", amount, txId)
         }
 
@@ -81,7 +96,7 @@ class MoneroWalletService(private val appContext: Context) {
         private var lastTxCount = 0
 
         override fun newBlock(height: Long) {
-            if (isStopping) return
+            if (isStopping || isPaused) return
             val wallet: Wallet? = wallet
             if (wallet == null) {
                 Timber.d("newBlock() wallet is null")
@@ -111,7 +126,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         override fun updated() {
-            if (isStopping) return
+            if (isStopping || isPaused) return
             Timber.d("updated()")
             val wallet: Wallet? = wallet
             if (wallet == null) {
@@ -122,7 +137,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         override fun refreshed() { // this means it's synced
-            if (isStopping) return
+            if (isStopping || isPaused) return
             Timber.d("refreshed()")
             val wallet: Wallet? = wallet
             if (wallet == null) {
@@ -270,6 +285,29 @@ class MoneroWalletService(private val appContext: Context) {
         }
         running = false
         isStopping = false
+        isPaused = false
+    }
+
+    @WorkerThread
+    fun pause() {
+        Timber.d("pause()")
+        isPaused = true
+        setObserver(null)
+        listener?.stop()
+    }
+
+    @WorkerThread
+    fun resume(anObserver: Observer): Boolean {
+        Timber.d("resume()")
+        if (listener == null) {
+            Timber.d("resume() listener is null — wallet not open")
+            return false
+        }
+        isPaused = false
+        setObserver(anObserver)
+        listener?.resume()
+        Timber.d("resume() done")
+        return true
     }
 
     fun sweep(txTag: String) {

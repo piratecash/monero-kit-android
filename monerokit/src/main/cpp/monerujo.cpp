@@ -16,8 +16,10 @@
 
 #include <inttypes.h>
 #include <cassert>
+#include <mutex>
 #include <signal.h>
 #include <setjmp.h>
+#include <unistd.h>
 #include "monerujo.h"
 #include "wallet2_api.h"
 
@@ -202,6 +204,7 @@ struct MyWalletListener : Monero::WalletListener {
 
     void deleteGlobalJavaRef(JNIEnv *env) {
         std::lock_guard<std::mutex> lock(_listenerMutex);
+        if (jlistener == nullptr) return;
         env->DeleteGlobalRef(jlistener);
         jlistener = nullptr;
     }
@@ -299,6 +302,22 @@ struct MyWalletListener : Monero::WalletListener {
     }
 };
 
+// ---------------------------------------------------------------------------
+// Retired listener pointers
+//
+// When closeJ runs, the Monero refresh thread may still be mid-callback
+// inside Wallet2CallbackImpl::on_new_block → m_listener->newBlock().
+// If we `delete` our MyWalletListener immediately, the vtable pointer becomes
+// garbage and the virtual dispatch crashes (SIGSEGV).
+//
+// Instead we "retire" the listener: release its JNI global ref (so callbacks
+// become no-ops via the existing mutex + nullptr check) but keep the C++
+// object alive permanently so the vtable stays valid.
+//
+// Each MyWalletListener is ~64 bytes — even 100 stop/start cycles leak only
+// ~6 KB, negligible for a mobile app's process lifetime. We intentionally
+// never free them to eliminate any race window entirely.
+// ---------------------------------------------------------------------------
 
 //// helper methods
 std::vector<std::string> java2cpp(JNIEnv *env, jobject arrayList) {
@@ -663,6 +682,13 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
         LOGW("closeJ: sigaltstack failed on this thread — SIGSEGV recovery may be unreliable");
     }
 
+    // Keep the listener valid until close succeeds. If close fails, Java will
+    // re-manage the wallet object and must still have a working listener.
+    // We only invalidate the JNI global ref once the wallet is actually
+    // considered closed (or we recover from a SIGSEGV during close).
+    MyWalletListener *walletListener = getHandle<MyWalletListener>(env, walletInstance,
+                                                                   "listenerHandle");
+
     bool closeSuccess = false;
     bool sigsegvOccurred = false;
 
@@ -671,6 +697,11 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
     // siglongjmp into an uninitialised buffer if a SIGSEGV fired in that window.
     if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
         g_in_safe_close = 1;  // jmpbuf is now valid — arm the handler
+        // Signal the refresh thread to stop and give it time to exit
+        // fast_refresh / on_new_block before closeWallet tears down the
+        // Wallet2CallbackImpl that the thread is calling through.
+        wallet->pauseRefresh();
+        usleep(100000); // 100 ms
         closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, safeStore);
         g_in_safe_close = 0;
     } else {
@@ -680,16 +711,13 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
     }
 
     if (closeSuccess || sigsegvOccurred) {
-        // On normal close: clean up listener and zero handles.
-        // On SIGSEGV: wallet2 state is undefined — do NOT touch it — but still
-        // clean up our own MyWalletListener and zero the handles so Java never
-        // tries to use the corrupted wallet again.
-        MyWalletListener *walletListener = getHandle<MyWalletListener>(env, walletInstance,
-                                                                       "listenerHandle");
         if (walletListener != nullptr) {
             walletListener->deleteGlobalJavaRef(env);
-            delete walletListener;
         }
+        // Do NOT delete walletListener — the refresh thread may still be
+        // unwinding through Wallet2CallbackImpl::on_new_block → our newBlock().
+        // Keeping the C++ object alive (~64 bytes) ensures the vtable stays
+        // valid. The JNI ref is released now, so any late callbacks become no-ops.
         env->SetLongField(walletInstance, getHandleField(env, walletInstance, "listenerHandle"), 0);
         env->SetLongField(walletInstance, getHandleField(env, walletInstance), 0);
     }
@@ -1442,7 +1470,10 @@ JNIEXPORT jlong JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_setListenerJ(JNIEnv *env, jobject instance,
                                                     jobject javaListener) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    // delete old listener first (safe even if wallet is null)
+
+    // Invalidate old listener — release JNI ref but keep the C++ object alive
+    // so any stale refresh thread callback lands on a valid vtable and returns
+    // safely (jlistener == nullptr under the mutex).
     MyWalletListener *oldListener = getHandle<MyWalletListener>(env, instance,
                                                                 "listenerHandle");
     if (oldListener != nullptr) {
@@ -1450,7 +1481,7 @@ Java_com_m2049r_xmrwallet_model_Wallet_setListenerJ(JNIEnv *env, jobject instanc
             wallet->setListener(nullptr);
         }
         oldListener->deleteGlobalJavaRef(env);
-        delete oldListener;
+        // Intentionally not deleted — see "Retired listener pointers" comment.
     }
     if (wallet == nullptr || javaListener == nullptr) {
         LOGD("setListenerJ: wallet=%p javaListener=%p", wallet, javaListener);
