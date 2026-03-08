@@ -199,12 +199,6 @@ class MoneroWalletService(private val appContext: Context) {
 
         fun onProgress(n: Int)
 
-        fun onTransactionCreated(tag: String?, pendingTransaction: PendingTransaction?)
-
-        fun onTransactionSent(txid: String?)
-
-        fun onSendTransactionFailed(error: String?)
-
         fun onWalletStarted(walletStatus: Wallet.Status?)
 
         fun onWalletOpen(device: Wallet.Device?)
@@ -310,90 +304,64 @@ class MoneroWalletService(private val appContext: Context) {
         return true
     }
 
-    fun sweep(txTag: String) {
-        val myWallet: Wallet? = wallet
-        if (myWallet == null) return
+    fun sweep() {
+        val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
         Timber.d("SWEEP TX for wallet: %s", myWallet.name)
-        myWallet.disposePendingTransaction() // remove any old pending tx
+        myWallet.disposePendingTransaction()
 
         val pendingTransaction = myWallet.createSweepUnmixableTransaction()
-        val status = pendingTransaction.getStatus()
-        Timber.d("transaction status %s", status)
-        if (status != PendingTransaction.Status.Status_Ok) {
-            Timber.w(
-                "Create Transaction failed: %s",
-                pendingTransaction.getErrorString()
-            )
-        }
-        if (observer != null) {
-            observer?.onTransactionCreated(txTag, pendingTransaction)
-        } else {
+        if (pendingTransaction.getStatus() != PendingTransaction.Status.Status_Ok) {
+            val error = pendingTransaction.getErrorString()
             myWallet.disposePendingTransaction()
+            throw IllegalStateException("Create sweep transaction failed: $error")
         }
     }
 
-    fun prepareTransaction(txTag: String, txData: TxData) {
-        val myWallet: Wallet? = wallet
-        if (myWallet == null) return
+    fun prepareTransaction(txData: TxData) {
+        val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
         Timber.d("CREATE TX for wallet: %s", myWallet.name)
-        myWallet.disposePendingTransaction() // remove any old pending tx
+        myWallet.disposePendingTransaction()
 
-        checkNotNull(txData)
         txData.createPocketChange(myWallet)
         val pendingTransaction = myWallet.createTransaction(txData)
-        val status = pendingTransaction.status
-        if (status != PendingTransaction.Status.Status_Ok) {
-            Timber.w(
-                "Create Transaction failed: %s",
-                pendingTransaction.getErrorString()
-            )
-        }
-        if (observer != null) {
-            observer?.onTransactionCreated(txTag, pendingTransaction)
-        } else {
+        if (pendingTransaction.status != PendingTransaction.Status.Status_Ok) {
+            val error = pendingTransaction.getErrorString()
             myWallet.disposePendingTransaction()
+            throw IllegalStateException("Create transaction failed: $error")
         }
     }
 
-    fun sendTransaction(notes: String?) {
-        val myWallet: Wallet? = wallet
-        if (myWallet == null) return
+    fun sendTransaction(notes: String?): String {
+        val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
         Timber.d("SEND TX for wallet: %s", myWallet.name)
-        val pendingTransaction = myWallet.pendingTransaction
-        requireNotNull(pendingTransaction) { "PendingTransaction is null" }
-        if (pendingTransaction.getStatus() != PendingTransaction.Status.Status_Ok) {
-            Timber.e("PendingTransaction is %s", pendingTransaction.getStatus())
-            val error = pendingTransaction.getErrorString()
-            myWallet.disposePendingTransaction() // it's broken anyway
-            observer?.onSendTransactionFailed(error)
-            return
+        val pendingTransaction = requireNotNull(myWallet.pendingTransaction) {
+            "PendingTransaction is null"
         }
-        val txid =
-            pendingTransaction.getFirstTxId() // tx ids vanish after commit()!
+        if (pendingTransaction.getStatus() != PendingTransaction.Status.Status_Ok) {
+            val error = pendingTransaction.getErrorString()
+            myWallet.disposePendingTransaction()
+            throw IllegalStateException("PendingTransaction failed: $error")
+        }
+        val txid = pendingTransaction.getFirstTxId()
 
         val success = pendingTransaction.commit("", true)
-        if (success) {
-            myWallet.disposePendingTransaction()
-            observer?.onTransactionSent(txid)
-            if ((notes != null) && (!notes.isEmpty())) {
-                myWallet.setUserNote(txid, notes)
-            }
-            val rc = myWallet.store()
-            Timber.d("wallet stored: %s with rc=%b", myWallet.getName(), rc)
-            if (!rc) {
-                Timber.w(
-                    "Wallet store failed: %s",
-                    myWallet.status.errorString
-                )
-            }
-            listener?.updated = true
-        } else {
+        if (!success) {
             val error = pendingTransaction.getErrorString()
             myWallet.disposePendingTransaction()
-            observer?.onSendTransactionFailed(error)
-            return
+            throw IllegalStateException("Transaction commit failed: $error")
         }
 
+        myWallet.disposePendingTransaction()
+        if (!notes.isNullOrEmpty()) {
+            myWallet.setUserNote(txid, notes)
+        }
+        val rc = myWallet.store()
+        Timber.d("wallet stored: %s with rc=%b", myWallet.getName(), rc)
+        if (!rc) {
+            Timber.w("Wallet store failed: %s", myWallet.status.errorString)
+        }
+        listener?.updated = true
+        return txid
     }
 
     private fun loadWallet(walletName: String?, walletPassword: String?): Wallet? {

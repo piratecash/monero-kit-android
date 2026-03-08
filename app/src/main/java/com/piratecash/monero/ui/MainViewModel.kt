@@ -358,24 +358,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
         )
     }
 
-    override fun onTransactionCreated(
-        tag: String?,
-        pendingTransaction: PendingTransaction?
-    ) {
-        Log.d(TAG, "onTransactionCreated() called with: tag = $tag, pendingTransaction = $pendingTransaction")
-        uiState.value = uiState.value.copy(isLoadingSending = false)
-    }
-
-    override fun onTransactionSent(txid: String?) {
-        Log.d(TAG, "onTransactionSent() called with: txid = $txid")
-        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = null, addressTo = "", amountTo = "", notesTo = "")
-    }
-
-    override fun onSendTransactionFailed(error: String?) {
-        Log.d(TAG, "onSendTransactionFailed() called with: error = $error")
-        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = error)
-    }
-
     override fun onWalletStarted(walletStatus: Wallet.Status?) {
         Log.d(TAG, "onWalletStarted() called with: walletStatus = $walletStatus")
     }
