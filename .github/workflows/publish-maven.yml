@@ -32,25 +32,17 @@ jobs:
         env:
           SHORT_SHA: ${{ env.SHORT_SHA }}
 
-      - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: gh-pages
-          fetch-depth: 1
-        continue-on-error: true
-
-      - name: Create gh-pages branch if missing
+      - name: Prepare gh-pages
         run: |
-          if [ ! -d "gh-pages/.git" ]; then
-            mkdir -p gh-pages
+          REMOTE_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git clone --depth 1 --branch gh-pages "$REMOTE_URL" gh-pages 2>/dev/null || {
+            mkdir gh-pages
             cd gh-pages
-            git init -b gh-pages
-          fi
+            git init
+          }
 
       - name: Copy artifacts to gh-pages
-        run: |
-          cp -r monerokit/build/maven-repo/* gh-pages/
+        run: cp -r monerokit/build/maven-repo/* gh-pages/
 
       - name: Keep only last 20 versions
         run: |
@@ -63,6 +55,7 @@ jobs:
       - name: Commit and push to gh-pages
         run: |
           cd gh-pages
+          git checkout -B gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
