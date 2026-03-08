@@ -225,6 +225,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun start(walletName: String?, walletPassword: String?): Wallet.Status? {
         isStopping = false
+        isPaused = false
         running = true
         Timber.d("start()")
 
@@ -343,6 +344,10 @@ class MoneroWalletService(private val appContext: Context) {
             throw IllegalStateException("PendingTransaction failed: $error")
         }
         val txid = pendingTransaction.getFirstTxId()
+        if (txid == null) {
+            myWallet.disposePendingTransaction()
+            throw IllegalStateException("Transaction has no txid")
+        }
 
         val success = pendingTransaction.commit("", true)
         if (!success) {
