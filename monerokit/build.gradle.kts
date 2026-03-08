@@ -4,7 +4,18 @@ import org.gradle.kotlin.dsl.compileOnly
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    `maven-publish`
 }
+
+val shortSha: String = providers.environmentVariable("SHORT_SHA")
+    .orElse(provider {
+        val process = ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        process.inputStream.bufferedReader().readLine()?.trim() ?: "unknown"
+    })
+    .get()
 
 android {
     namespace = "com.piratecash.monero"
@@ -74,4 +85,23 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "com.github.piratecash"
+                artifactId = "monero-kit-android"
+                version = shortSha
+            }
+        }
+        repositories {
+            maven {
+                name = "local"
+                url = uri(layout.buildDirectory.dir("maven-repo"))
+            }
+        }
+    }
 }
