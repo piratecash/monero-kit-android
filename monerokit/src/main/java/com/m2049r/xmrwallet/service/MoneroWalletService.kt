@@ -272,8 +272,8 @@ class MoneroWalletService(private val appContext: Context) {
             listener?.stop()
             val myWallet = wallet
             Timber.d("stop() closing")
-            // close(store=true) joins the refresh thread first, then stores atomically —
-            // no race between the refresh thread and store().
+            // JNI closeJ stores separately (with SIGSEGV protection), then
+            // closes without store — which joins the refresh thread via stop()/deinit().
             myWallet?.close(saveWallet)
             Timber.d("stop() closed")
             listener = null

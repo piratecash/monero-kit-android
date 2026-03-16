@@ -690,24 +690,65 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
                                                                    "listenerHandle");
 
     bool closeSuccess = false;
+    bool storeSuccess = false;
     bool sigsegvOccurred = false;
 
-    // sigsetjmp must be called first so g_close_jmpbuf is valid before we arm
-    // the handler. Setting g_in_safe_close = 1 before sigsetjmp would risk a
-    // siglongjmp into an uninitialised buffer if a SIGSEGV fired in that window.
-    if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
-        g_in_safe_close = 1;  // jmpbuf is now valid — arm the handler
-        // Signal the refresh thread to stop and give it time to exit
-        // fast_refresh / on_new_block before closeWallet tears down the
-        // Wallet2CallbackImpl that the thread is calling through.
-        wallet->pauseRefresh();
-        usleep(100000); // 100 ms
-        closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, safeStore);
-        g_in_safe_close = 0;
-    } else {
-        g_in_safe_close = 0;
-        sigsegvOccurred = true;
-        LOGE("closeJ: SIGSEGV in closeWallet(store=%d) — leaking wallet object to prevent process death", (int) store);
+    // Signal the refresh thread to stop.
+    wallet->pauseRefresh();
+
+    // --- Store separately, before close ---
+    //
+    // Upstream WalletImpl::close(true) calls store() BEFORE stop(), so the
+    // refresh thread may still be modifying the hashchain when store()
+    // serialises it — causing heap corruption (Scudo "invalid chunk state").
+    //
+    // By calling store() ourselves and then closeWallet(false), we keep the
+    // SIGSEGV protection around the dangerous store() call, while close(false)
+    // only runs stop()/deinit() which properly joins the refresh thread.
+    //
+    // IMPORTANT: pauseRefresh() only flips a flag — if the refresh thread is
+    // already inside doRefresh() it won't exit until that call returns.
+    // There is no public API to join the thread without rebuilding the Monero
+    // libs.  The fixed wait reduces the probability of a race; the SIGSEGV
+    // handler is the actual safety net.
+    if (safeStore) {
+        // Best-effort wait for the refresh thread to leave doRefresh().
+        // Not a synchronisation guarantee — see SIGSEGV handler below.
+        usleep(200000); // 200 ms
+
+        if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
+            g_in_safe_close = 1;
+            storeSuccess = wallet->store("");  // empty string = default path
+            g_in_safe_close = 0;
+            if (!storeSuccess) {
+                LOGE("closeJ: store() returned false — %s", wallet->errorString().c_str());
+            }
+        } else {
+            // store() faulted — wallet state is undefined (internal mutexes may
+            // be locked, data structures corrupted).  We MUST NOT touch the
+            // wallet object again.  Leak it, same as the original safety contract.
+            g_in_safe_close = 0;
+            sigsegvOccurred = true;
+            LOGE("closeJ: SIGSEGV during store() — leaking wallet object");
+        }
+    }
+
+    // --- Close without store ---
+    // close(false) skips store() and only runs stop()/deinit(), which
+    // properly joins the refresh thread.  Safe regardless of store outcome.
+    //
+    // Skip if store() already SIGSEGV'd — the wallet object is in an
+    // undefined state and must be leaked (see comment above).
+    if (!sigsegvOccurred) {
+        if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
+            g_in_safe_close = 1;
+            closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, false);
+            g_in_safe_close = 0;
+        } else {
+            g_in_safe_close = 0;
+            sigsegvOccurred = true;
+            LOGE("closeJ: SIGSEGV in closeWallet(store=false) — leaking wallet object");
+        }
     }
 
     if (closeSuccess || sigsegvOccurred) {
@@ -725,7 +766,7 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
     // On SIGSEGV we return true: handles are already zeroed and listener cleaned up,
     // so from Java's perspective the wallet is closed. Returning false would cause
     // WalletManager.close() to call manageWallet() on the zeroed handle.
-    LOGD("wallet closed (success=%d sigsegv=%d)", closeSuccess, sigsegvOccurred);
+    LOGD("wallet closed (stored=%d close=%d sigsegv=%d)", storeSuccess, closeSuccess, sigsegvOccurred);
     return static_cast<jboolean>(closeSuccess || sigsegvOccurred);
 }
 
