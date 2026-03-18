@@ -21,7 +21,7 @@ import com.m2049r.xmrwallet.util.Helper
 import com.m2049r.xmrwallet.util.KeyStoreHelper
 import com.m2049r.xmrwallet.util.NodePinger
 import com.m2049r.xmrwallet.util.RestoreHeight
-import com.piratecash.monero.BuildConfig
+import com.piratecash.monero.app.BuildConfig
 import com.piratecash.monero.MyApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
