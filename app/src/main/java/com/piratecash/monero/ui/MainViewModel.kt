@@ -338,7 +338,7 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
                     txData.setMixin(wallet.getDefaultMixin())
                     txData.setPriority(PendingTransaction.Priority.Priority_Default)
                     txData.setUserNotes(UserNotes(notes))
-                    walletService.prepareTransaction("send", txData)
+                    walletService.prepareTransaction(txData)
                     walletService.sendTransaction(notes)
                 } catch (e: Exception) {
                     uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = e.message)
