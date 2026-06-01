@@ -7,7 +7,12 @@ plugins {
     `maven-publish`
 }
 
-val shortSha: String = providers.environmentVariable("SHORT_SHA")
+// JitPack injects the requested tag via JITPACK_VERSION/VERSION; the gh-pages workflow injects
+// SHORT_SHA; local builds fall back to the current git short SHA.
+val resolvedVersion: String = providers.environmentVariable("JITPACK_VERSION")
+    .orElse(providers.environmentVariable("VERSION"))
+    .orElse(providers.environmentVariable("VERSION_NAME"))
+    .orElse(providers.environmentVariable("SHORT_SHA"))
     .orElse(provider {
         val process = ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
             .directory(rootDir)
@@ -94,7 +99,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.github.piratecash"
                 artifactId = "monero-kit-android"
-                version = shortSha
+                version = resolvedVersion
             }
         }
         repositories {
