@@ -361,7 +361,13 @@ public class Wallet {
 
     private native long createSweepUnmixableTransactionJ();
 
-//virtual UnsignedTransaction * loadUnsignedTx(const std::string &unsigned_filename) = 0;
+    public UnsignedTransaction loadUnsignedTx(String unsignedFileName) {
+        long unsignedTxHandle = loadUnsignedTxJ(unsignedFileName);
+        if (unsignedTxHandle == 0) return null;
+        return new UnsignedTransaction(unsignedTxHandle);
+    }
+
+    private native long loadUnsignedTxJ(String unsignedFileName);
 
     public native boolean submitTransaction(String fileName);
 

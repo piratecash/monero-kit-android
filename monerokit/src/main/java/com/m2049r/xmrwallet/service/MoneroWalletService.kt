@@ -20,6 +20,7 @@ import androidx.annotation.WorkerThread
 import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.TxData
 import com.m2049r.xmrwallet.model.PendingTransaction
+import com.m2049r.xmrwallet.model.UnsignedTransaction
 import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.Wallet.ConnectionStatus
 import com.m2049r.xmrwallet.model.WalletListener
@@ -334,7 +335,8 @@ class MoneroWalletService(private val appContext: Context) {
     fun createSignedRawTransaction(txData: TxData): SignedRawMoneroTransaction {
         val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
         Timber.d("CREATE SIGNED RAW TX for wallet: %s", myWallet.name)
-        var tempFile: File? = null
+        var unsignedFile: File? = null
+        var signedFile: File? = null
 
         return try {
             val pendingTransaction = myWallet.createCheckedTransaction(txData) { error ->
@@ -345,13 +347,13 @@ class MoneroWalletService(private val appContext: Context) {
                 ?: throw MoneroRawTransactionError.CreateFailed("Transaction has no txid")
             val fee = pendingTransaction.getFee()
             val txCount = pendingTransaction.getTxCount()
-            tempFile = File.createTempFile("pcash-xmr-signed-", ".tx", appContext.cacheDir)
+            unsignedFile = File.createTempFile("pcash-xmr-unsigned-", ".tx", appContext.cacheDir)
+            signedFile = File.createTempFile("pcash-xmr-signed-", ".tx", appContext.cacheDir)
 
-            if (!pendingTransaction.commit(tempFile.absolutePath, true)) {
-                throw MoneroRawTransactionError.SaveFailed(pendingTransaction.getErrorString())
-            }
+            saveUnsignedTransaction(pendingTransaction, unsignedFile)
+            signUnsignedTransaction(myWallet, unsignedFile, signedFile)
 
-            val signedTransactionFile = tempFile.readBytes()
+            val signedTransactionFile = signedFile.readBytes()
             if (signedTransactionFile.isEmpty()) {
                 throw MoneroRawTransactionError.SaveFailed("Signed transaction file is empty")
             }
@@ -359,7 +361,31 @@ class MoneroWalletService(private val appContext: Context) {
             SignedRawMoneroTransaction(raw, txId, fee, txCount)
         } finally {
             myWallet.disposePendingTransaction()
-            tempFile?.delete()
+            unsignedFile?.delete()
+            signedFile?.delete()
+        }
+    }
+
+    private fun saveUnsignedTransaction(pendingTransaction: PendingTransaction, unsignedFile: File) {
+        if (!pendingTransaction.commit(unsignedFile.absolutePath, true)) {
+            throw MoneroRawTransactionError.SaveFailed(pendingTransaction.getErrorString())
+        }
+    }
+
+    private fun signUnsignedTransaction(wallet: Wallet, unsignedFile: File, signedFile: File) {
+        var unsignedTransaction: UnsignedTransaction? = null
+        try {
+            unsignedTransaction = wallet.loadUnsignedTx(unsignedFile.absolutePath)
+                ?: throw MoneroRawTransactionError.SignFailed("Load unsigned transaction failed")
+
+            if (unsignedTransaction.getStatus() != UnsignedTransaction.Status.Status_Ok) {
+                throw MoneroRawTransactionError.SignFailed(unsignedTransaction.getErrorString())
+            }
+            if (!unsignedTransaction.sign(signedFile.absolutePath)) {
+                throw MoneroRawTransactionError.SignFailed(unsignedTransaction.getErrorString())
+            }
+        } finally {
+            unsignedTransaction?.dispose()
         }
     }
 

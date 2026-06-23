@@ -44,6 +44,15 @@ class SignedMoneroTransactionEnvelopeTest {
     }
 
     @Test
+    fun encode_unsignedTransactionSet_throws() {
+        val unsignedTransactionSet = "Monero unsigned tx set".encodeToByteArray() + byteArrayOf(1, 2, 3)
+
+        assertThrows(MoneroRawTransactionError.InvalidRawTransaction::class.java) {
+            SignedMoneroTransactionEnvelope.encode("a".repeat(64), unsignedTransactionSet)
+        }
+    }
+
+    @Test
     fun signedRawMoneroTransaction_sameBytes_comparesByContent() {
         val first = SignedRawMoneroTransaction(
             raw = byteArrayOf(1, 2, 3),

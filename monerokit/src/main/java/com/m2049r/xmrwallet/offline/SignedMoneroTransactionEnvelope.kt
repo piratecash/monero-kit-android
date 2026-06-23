@@ -23,6 +23,7 @@ class DecodedSignedMoneroTransaction(
 
 object SignedMoneroTransactionEnvelope {
     private val magic = "PCASH_XMR_SIGNED_TX_V1".toByteArray(StandardCharsets.US_ASCII)
+    private val unsignedTxSetPrefix = "Monero unsigned tx set".toByteArray(StandardCharsets.US_ASCII)
     private const val separator: Byte = 0
     private const val txIdLength = 64
 
@@ -30,6 +31,11 @@ object SignedMoneroTransactionEnvelope {
         validateTxId(txId)
         if (signedTransactionFile.isEmpty()) {
             throw MoneroRawTransactionError.InvalidRawTransaction("Signed transaction file is empty")
+        }
+        if (signedTransactionFile.startsWith(unsignedTxSetPrefix)) {
+            throw MoneroRawTransactionError.InvalidRawTransaction(
+                "Expected signed transaction file but got unsigned transaction set"
+            )
         }
 
         val txIdBytes = txId.toByteArray(StandardCharsets.US_ASCII)
@@ -75,4 +81,7 @@ object SignedMoneroTransactionEnvelope {
             throw MoneroRawTransactionError.InvalidRawTransaction("Invalid Monero transaction txid")
         }
     }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
 }

@@ -1453,7 +1453,33 @@ Java_com_m2049r_xmrwallet_model_Wallet_submitTransaction(JNIEnv *env, jobject in
     return static_cast<jboolean>(success);
 }
 
-//virtual UnsignedTransaction * loadUnsignedTx(const std::string &unsigned_filename) = 0;
+JNIEXPORT jlong JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_loadUnsignedTxJ(JNIEnv *env, jobject instance,
+                                                       jstring unsignedFileName) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return 0;
+    }
+    if (unsignedFileName == nullptr) {
+        LOGE("loadUnsignedTx unsignedFileName is null");
+        return 0;
+    }
+
+    const char *_unsignedFileName = env->GetStringUTFChars(unsignedFileName, nullptr);
+    if (_unsignedFileName == nullptr) {
+        LOGE("loadUnsignedTx failed to read unsignedFileName");
+        return 0;
+    }
+    Monero::UnsignedTransaction *tx = nullptr;
+    try {
+        tx = wallet->loadUnsignedTx(std::string(_unsignedFileName));
+    } catch (const std::exception &e) {
+        LOGE("loadUnsignedTx: caught exception: %s", e.what());
+    }
+    env->ReleaseStringUTFChars(unsignedFileName, _unsignedFileName);
+    return reinterpret_cast<jlong>(tx);
+}
 
 JNIEXPORT void JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_disposeTransaction(JNIEnv *env, jobject instance,
@@ -1918,6 +1944,57 @@ Java_com_m2049r_xmrwallet_model_TransactionHistory_refreshJ(JNIEnv *env, jobject
 }
 
 // TransactionInfo is implemented in Java - no need here
+
+JNIEXPORT jint JNICALL
+Java_com_m2049r_xmrwallet_model_UnsignedTransaction_getStatusJ(JNIEnv *env, jobject instance) {
+    Monero::UnsignedTransaction *tx = getHandle<Monero::UnsignedTransaction>(env, instance);
+    if (tx == nullptr) return Monero::UnsignedTransaction::Status_Critical;
+    return tx->status();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_m2049r_xmrwallet_model_UnsignedTransaction_getErrorString(JNIEnv *env, jobject instance) {
+    Monero::UnsignedTransaction *tx = getHandle<Monero::UnsignedTransaction>(env, instance);
+    if (tx == nullptr) return env->NewStringUTF("Unsigned transaction handle is null");
+    return env->NewStringUTF(tx->errorString().c_str());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_m2049r_xmrwallet_model_UnsignedTransaction_sign(JNIEnv *env, jobject instance,
+                                                        jstring signedFileName) {
+    Monero::UnsignedTransaction *tx = getHandle<Monero::UnsignedTransaction>(env, instance);
+    if (tx == nullptr) {
+        LOGE("unsigned transaction handle is null in %s", __FUNCTION__);
+        return JNI_FALSE;
+    }
+    if (signedFileName == nullptr) {
+        LOGE("unsigned transaction sign signedFileName is null");
+        return JNI_FALSE;
+    }
+
+    const char *_signedFileName = env->GetStringUTFChars(signedFileName, nullptr);
+    if (_signedFileName == nullptr) {
+        LOGE("unsigned transaction sign failed to read signedFileName");
+        return JNI_FALSE;
+    }
+    bool success = false;
+    try {
+        success = tx->sign(std::string(_signedFileName));
+    } catch (const std::exception &e) {
+        LOGE("unsigned transaction sign: caught exception: %s", e.what());
+    }
+    env->ReleaseStringUTFChars(signedFileName, _signedFileName);
+    return static_cast<jboolean>(success);
+}
+
+JNIEXPORT void JNICALL
+Java_com_m2049r_xmrwallet_model_UnsignedTransaction_disposeJ(JNIEnv *env, jobject instance) {
+    Monero::UnsignedTransaction *tx = getHandle<Monero::UnsignedTransaction>(env, instance);
+    if (tx != nullptr) {
+        delete tx;
+        setHandleFromLong(env, instance, 0);
+    }
+}
 
 JNIEXPORT jint JNICALL
 Java_com_m2049r_xmrwallet_model_PendingTransaction_getStatusJ(JNIEnv *env, jobject instance) {

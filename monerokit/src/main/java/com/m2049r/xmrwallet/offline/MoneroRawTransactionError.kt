@@ -5,5 +5,6 @@ sealed class MoneroRawTransactionError(message: String) : Exception(message) {
     class WalletNotInitialized : MoneroRawTransactionError("Monero wallet not initialized")
     class CreateFailed(message: String) : MoneroRawTransactionError(message)
     class SaveFailed(message: String) : MoneroRawTransactionError(message)
+    class SignFailed(message: String) : MoneroRawTransactionError(message)
     class SubmitFailed(message: String) : MoneroRawTransactionError(message)
 }
