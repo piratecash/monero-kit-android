@@ -1,0 +1,155 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.github.piratecash",
+    "module": "monero-kit-android",
+    "version": "36bfce1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.13"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseApiElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.0.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "monero-kit-android-36bfce1.aar",
+          "url": "monero-kit-android-36bfce1.aar",
+          "size": 27654515,
+          "sha512": "8a06a4b55ea00d93d95aed42fc2141aab744affde9acbb5a7823afdd0c965572d8b0f58f0ab6bbdea168223267664ea6e2259f8ef5c15a87eba786f8dd289573",
+          "sha256": "df175a777578c1c55c43306f2b7ed01d9acaf1f00588dd6eec941077bfee0c60",
+          "sha1": "88a2d90260938a354490bf0458f22e815fe6604b",
+          "md5": "736e8adeb16535dcb29cb8668c9eb984"
+        }
+      ]
+    },
+    {
+      "name": "releaseRuntimeElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.core",
+          "module": "core-ktx",
+          "version": {
+            "requires": "1.16.0"
+          }
+        },
+        {
+          "group": "androidx.appcompat",
+          "module": "appcompat",
+          "version": {
+            "requires": "1.7.1"
+          }
+        },
+        {
+          "group": "com.google.android.material",
+          "module": "material",
+          "version": {
+            "requires": "1.12.0"
+          }
+        },
+        {
+          "group": "com.jakewharton.timber",
+          "module": "timber",
+          "version": {
+            "requires": "5.0.1"
+          }
+        },
+        {
+          "group": "com.google.guava",
+          "module": "guava",
+          "version": {
+            "requires": "33.4.8-android"
+          }
+        },
+        {
+          "group": "com.squareup.okhttp3",
+          "module": "okhttp",
+          "version": {
+            "requires": "4.12.0"
+          }
+        },
+        {
+          "group": "io.github.rburgst",
+          "module": "okhttp-digest",
+          "version": {
+            "requires": "3.1.1"
+          }
+        },
+        {
+          "group": "info.guardianproject.netcipher",
+          "module": "netcipher",
+          "version": {
+            "requires": "2.1.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.0.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "monero-kit-android-36bfce1.aar",
+          "url": "monero-kit-android-36bfce1.aar",
+          "size": 27654515,
+          "sha512": "8a06a4b55ea00d93d95aed42fc2141aab744affde9acbb5a7823afdd0c965572d8b0f58f0ab6bbdea168223267664ea6e2259f8ef5c15a87eba786f8dd289573",
+          "sha256": "df175a777578c1c55c43306f2b7ed01d9acaf1f00588dd6eec941077bfee0c60",
+          "sha1": "88a2d90260938a354490bf0458f22e815fe6604b",
+          "md5": "736e8adeb16535dcb29cb8668c9eb984"
+        }
+      ]
+    },
+    {
+      "name": "releaseSourcesElements-published",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "files": [
+        {
+          "name": "monero-kit-android-36bfce1-sources.jar",
+          "url": "monero-kit-android-36bfce1-sources.jar",
+          "size": 346012,
+          "sha512": "87eaf7482c0a1ee804fd5d567a56b6bd22ad99f7575a86249457d1833cacc3f897ca97503e21a28eef48172fdaa79b6d4b92af4b6b58b1929111d656bd54bdd7",
+          "sha256": "145edc3d60b2e84e3b4e024e1dd75da542b0db7d54fb67da72d59d4a7950c721",
+          "sha1": "dd2932aec0875e90be16d85df7868df569a4296a",
+          "md5": "963ee7449939e1a63c68e0efbf851be3"
+        }
+      ]
+    }
+  ]
+}
