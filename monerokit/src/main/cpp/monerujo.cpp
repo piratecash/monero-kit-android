@@ -1425,8 +1425,35 @@ Java_com_m2049r_xmrwallet_model_Wallet_createSweepUnmixableTransactionJ(JNIEnv *
     return reinterpret_cast<jlong>(tx);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_submitTransaction(JNIEnv *env, jobject instance,
+                                                         jstring fileName) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return JNI_FALSE;
+    }
+    if (fileName == nullptr) {
+        LOGE("submitTransaction fileName is null");
+        return JNI_FALSE;
+    }
+
+    const char *_fileName = env->GetStringUTFChars(fileName, nullptr);
+    if (_fileName == nullptr) {
+        LOGE("submitTransaction failed to read fileName");
+        return JNI_FALSE;
+    }
+    bool success = false;
+    try {
+        success = wallet->submitTransaction(std::string(_fileName));
+    } catch (const std::exception &e) {
+        LOGE("submitTransaction: caught exception: %s", e.what());
+    }
+    env->ReleaseStringUTFChars(fileName, _fileName);
+    return static_cast<jboolean>(success);
+}
+
 //virtual UnsignedTransaction * loadUnsignedTx(const std::string &unsigned_filename) = 0;
-//virtual bool submitTransaction(const std::string &fileName) = 0;
 
 JNIEXPORT void JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_disposeTransaction(JNIEnv *env, jobject instance,

@@ -24,7 +24,12 @@ import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.Wallet.ConnectionStatus
 import com.m2049r.xmrwallet.model.WalletListener
 import com.m2049r.xmrwallet.model.WalletManager
+import com.m2049r.xmrwallet.offline.MoneroRawTransactionError
+import com.m2049r.xmrwallet.offline.RawMoneroBroadcastResult
+import com.m2049r.xmrwallet.offline.SignedMoneroTransactionEnvelope
+import com.m2049r.xmrwallet.offline.SignedRawMoneroTransaction
 import com.m2049r.xmrwallet.util.Helper
+import java.io.File
 import timber.log.Timber
 
 class MoneroWalletService(private val appContext: Context) {
@@ -321,15 +326,76 @@ class MoneroWalletService(private val appContext: Context) {
     fun prepareTransaction(txData: TxData) {
         val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
         Timber.d("CREATE TX for wallet: %s", myWallet.name)
-        myWallet.disposePendingTransaction()
-
-        txData.createPocketChange(myWallet)
-        val pendingTransaction = myWallet.createTransaction(txData)
-        if (pendingTransaction.status != PendingTransaction.Status.Status_Ok) {
-            val error = pendingTransaction.getErrorString()
-            myWallet.disposePendingTransaction()
-            throw IllegalStateException("Create transaction failed: $error")
+        myWallet.createCheckedTransaction(txData) { error ->
+            IllegalStateException("Create transaction failed: $error")
         }
+    }
+
+    fun createSignedRawTransaction(txData: TxData): SignedRawMoneroTransaction {
+        val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
+        Timber.d("CREATE SIGNED RAW TX for wallet: %s", myWallet.name)
+        var tempFile: File? = null
+
+        return try {
+            val pendingTransaction = myWallet.createCheckedTransaction(txData) { error ->
+                MoneroRawTransactionError.CreateFailed(error)
+            }
+
+            val txId = pendingTransaction.getFirstTxIdJ()
+                ?: throw MoneroRawTransactionError.CreateFailed("Transaction has no txid")
+            val fee = pendingTransaction.getFee()
+            val txCount = pendingTransaction.getTxCount()
+            tempFile = File.createTempFile("pcash-xmr-signed-", ".tx", appContext.cacheDir)
+
+            if (!pendingTransaction.commit(tempFile.absolutePath, true)) {
+                throw MoneroRawTransactionError.SaveFailed(pendingTransaction.getErrorString())
+            }
+
+            val signedTransactionFile = tempFile.readBytes()
+            if (signedTransactionFile.isEmpty()) {
+                throw MoneroRawTransactionError.SaveFailed("Signed transaction file is empty")
+            }
+            val raw = SignedMoneroTransactionEnvelope.encode(txId, signedTransactionFile)
+            SignedRawMoneroTransaction(raw, txId, fee, txCount)
+        } finally {
+            myWallet.disposePendingTransaction()
+            tempFile?.delete()
+        }
+    }
+
+    fun submitSignedRawTransaction(raw: ByteArray): RawMoneroBroadcastResult {
+        val decoded = SignedMoneroTransactionEnvelope.decode(raw)
+        val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
+        var tempFile: File? = null
+
+        return try {
+            tempFile = File.createTempFile("pcash-xmr-submit-", ".tx", appContext.cacheDir)
+            tempFile.writeBytes(decoded.signedTransactionFile)
+
+            if (!myWallet.submitTransaction(tempFile.absolutePath)) {
+                throw MoneroRawTransactionError.SubmitFailed(myWallet.status.errorString)
+            }
+
+            listener?.updated = true
+            RawMoneroBroadcastResult(decoded.txId)
+        } finally {
+            tempFile?.delete()
+        }
+    }
+
+    private fun Wallet.createCheckedTransaction(
+        txData: TxData,
+        createError: (String) -> Exception,
+    ): PendingTransaction {
+        disposePendingTransaction()
+        txData.createPocketChange(this)
+        val pendingTransaction = createTransaction(txData)
+        if (pendingTransaction.getStatus() != PendingTransaction.Status.Status_Ok) {
+            val error = pendingTransaction.getErrorString()
+            disposePendingTransaction()
+            throw createError(error)
+        }
+        return pendingTransaction
     }
 
     fun sendTransaction(notes: String?): String {
