@@ -88,6 +88,10 @@ dependencies {
     annotationProcessor(libs.lombok)
 
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
+    // Real org.json implementation for unit tests: the Android SDK stub used by default in JVM
+    // unit tests throws on every call (org.json classes are not part of android.util.* mocking).
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
