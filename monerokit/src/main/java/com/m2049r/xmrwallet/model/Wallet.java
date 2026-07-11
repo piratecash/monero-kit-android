@@ -205,6 +205,12 @@ public class Wallet {
 
     public native synchronized boolean store(String path);
 
+    private native int storeSafeJ();
+
+    public int storeSafe() {
+        return storeSafeJ();
+    }
+
     public boolean close(boolean store) {
         disposePendingTransaction();
         return WalletManager.getInstance().close(this, store);

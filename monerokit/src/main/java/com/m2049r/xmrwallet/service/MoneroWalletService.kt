@@ -289,6 +289,22 @@ class MoneroWalletService(private val appContext: Context) {
         isPaused = false
     }
 
+    /**
+     * Abandons ownership of a wallet whose native state faulted during a guarded
+     * `storeSafe()` (status 2). The native handle is already zeroed, so this makes
+     * no native calls on the dead wallet — it only clears Java-side references so
+     * a subsequent `start()` opens a fresh wallet.
+     */
+    fun abandonFaultedWallet() {
+        val w = WalletManager.getInstance().wallet
+        WalletManager.getInstance().clearManagedWalletIfCurrent(w)
+        listener = null
+        running = false
+        isStopping = false
+        isPaused = false
+        setObserver(null)
+    }
+
     @WorkerThread
     fun pause() {
         Timber.d("pause()")

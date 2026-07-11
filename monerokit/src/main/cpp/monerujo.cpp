@@ -95,6 +95,24 @@ static void ensure_thread_altstack() {
     g_altstack_ready = true;
 }
 
+// Guarded wallet->store("") used by both closeJ and the standalone storeSafeJ.
+// Return: 0 = stored ok; 1 = store() returned false; 2 = SIGSEGV (wallet
+// UNDEFINED, do not touch); 3 = skipped because the signal guard is not
+// installed (non-fatal).
+static int guarded_store(Monero::Wallet *wallet) {
+    if (!g_safe_close_ready) return 3;
+    ensure_thread_altstack();
+    if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
+        g_in_safe_close = 1;
+        bool ok = wallet->store("");
+        g_in_safe_close = 0;
+        return ok ? 0 : 1;
+    } else {
+        g_in_safe_close = 0;
+        return 2;
+    }
+}
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -716,21 +734,20 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instan
         // Not a synchronisation guarantee — see SIGSEGV handler below.
         usleep(200000); // 200 ms
 
-        if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
-            g_in_safe_close = 1;
-            storeSuccess = wallet->store("");  // empty string = default path
-            g_in_safe_close = 0;
-            if (!storeSuccess) {
-                LOGE("closeJ: store() returned false — %s", wallet->errorString().c_str());
-            }
-        } else {
+        int storeStatus = guarded_store(wallet);
+        if (storeStatus == 0) {
+            storeSuccess = true;
+        } else if (storeStatus == 1) {
+            LOGE("closeJ: store() returned false — %s", wallet->errorString().c_str());
+        } else if (storeStatus == 2) {
             // store() faulted — wallet state is undefined (internal mutexes may
             // be locked, data structures corrupted).  We MUST NOT touch the
             // wallet object again.  Leak it, same as the original safety contract.
-            g_in_safe_close = 0;
             sigsegvOccurred = true;
             LOGE("closeJ: SIGSEGV during store() — leaking wallet object");
         }
+        // storeStatus == 3 (guard unavailable) can't happen here — safeStore
+        // already implies g_safe_close_ready.
     }
 
     // --- Close without store ---
@@ -947,6 +964,36 @@ Java_com_m2049r_xmrwallet_model_Wallet_store(JNIEnv *env, jobject instance,
     }
     env->ReleaseStringUTFChars(path, _path);
     return static_cast<jboolean>(success);
+}
+
+// SIGSEGV-guarded store() to the wallet's default path, for use OFF the
+// refresh thread (e.g. save-on-synced). Return: 0 = stored ok; 1 = store()
+// returned false (also used as the null-handle guard result); 2 = SIGSEGV
+// (native wallet leaked, listener/handle zeroed — see closeJ); 3 = guard not
+// installed (non-fatal, caller should skip).
+JNIEXPORT jint JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_storeSafeJ(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("storeSafeJ() wallet is null");
+        return 1;
+    }
+
+    int s = guarded_store(wallet);
+    if (s == 2) {
+        // store() faulted — same post-fault cleanup as closeJ: invalidate the
+        // JNI listener ref and zero the Java-side handles so the (leaked)
+        // native wallet is never touched again.
+        MyWalletListener *walletListener = getHandle<MyWalletListener>(env, instance,
+                                                                       "listenerHandle");
+        if (walletListener != nullptr) {
+            walletListener->deleteGlobalJavaRef(env);
+        }
+        env->SetLongField(instance, getHandleField(env, instance, "listenerHandle"), 0);
+        env->SetLongField(instance, getHandleField(env, instance), 0);
+        LOGE("storeSafeJ: SIGSEGV during store() — leaking wallet object");
+    }
+    return s;
 }
 
 JNIEXPORT jstring JNICALL

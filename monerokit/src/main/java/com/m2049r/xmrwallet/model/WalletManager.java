@@ -94,6 +94,18 @@ public class WalletManager {
         managedWallet = null;
     }
 
+    /**
+     * Clears the managed wallet reference by identity only, without touching the
+     * native wallet (no {@code getName()} or other native call). Used after a
+     * {@code storeSafe()} SIGSEGV, where the wallet's native state is undefined
+     * and must not be dereferenced.
+     */
+    public void clearManagedWalletIfCurrent(Wallet expected) {
+        if (managedWallet == expected) {
+            managedWallet = null;
+        }
+    }
+
     public Wallet createWallet(File aFile, String password, String language, long height) {
         long walletHandle = createWalletJ(aFile.getAbsolutePath(), password, language, getNetworkType().getValue());
         Wallet wallet = new Wallet(walletHandle);
