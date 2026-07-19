@@ -80,7 +80,9 @@ dependencies {
     implementation(libs.timber)
     implementation(libs.guava)
 
-    implementation(libs.okhttp3)
+    // api (not implementation): okhttp3.EventListener.Factory is exposed in the public signature of
+    // NetCipherHelper.setEventListenerFactory, so the type must be visible to consumers.
+    api(libs.okhttp3)
     implementation(libs.okhttp.digest)
     implementation(libs.netcipher)
 

@@ -49,6 +49,7 @@ import lombok.Setter;
 import lombok.ToString;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.EventListener;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -98,6 +99,17 @@ public class NetCipherHelper implements StatusCallback {
     }
 
     private OkHttpClient client;
+
+    /**
+     * Passive per-call network observer, default null (no observer). When set, it is attached to
+     * every daemon HTTP call built by {@link Request#getClient(long)} — covering node pings and the
+     * pre-broadcast tx check. Additive: a null factory leaves client behavior unchanged.
+     */
+    private static volatile EventListener.Factory eventListenerFactory;
+
+    public static void setEventListenerFactory(EventListener.Factory factory) {
+        eventListenerFactory = factory;
+    }
 
     private void createTorClient(Intent statusIntent) {
         String orbotStatus = statusIntent.getStringExtra(MyOrbotHelper.EXTRA_STATUS);
@@ -353,7 +365,8 @@ public class NetCipherHelper implements StatusCallback {
         private OkHttpClient getClient(long callTimeoutMs) {
             final OkHttpClient client = mockClient != null ? mockClient : getInstance().client; // Unit-test mode
             final boolean hasAuth = (username != null) && (!username.isEmpty());
-            if (callTimeoutMs <= 0 && !hasAuth) return client;
+            final EventListener.Factory factory = eventListenerFactory;
+            if (callTimeoutMs <= 0 && !hasAuth && factory == null) return client;
 
             final OkHttpClient.Builder builder = client.newBuilder();
             if (callTimeoutMs > 0) {
@@ -365,6 +378,9 @@ public class NetCipherHelper implements StatusCallback {
                 builder.authenticator(new CachingAuthenticatorDecorator(authenticator, authCache))
                         .addInterceptor(new AuthenticationCacheInterceptor(authCache));
                 // TODO: maybe cache & reuse the client for these credentials?
+            }
+            if (factory != null) {
+                builder.eventListenerFactory(factory);
             }
             return builder.build();
         }
