@@ -39,6 +39,7 @@ class MoneroWalletService(private val appContext: Context) {
     private var isStopping = false
     @Volatile
     private var isPaused = false
+    private var failedWalletStatus: Wallet.Status? = null
 
     private inner class MyWalletListener : WalletListener {
         var updated: Boolean = true
@@ -232,6 +233,7 @@ class MoneroWalletService(private val appContext: Context) {
     fun start(walletName: String?, walletPassword: String?): Wallet.Status? {
         isStopping = false
         isPaused = false
+        failedWalletStatus = null
         running = true
         Timber.d("start()")
 
@@ -239,7 +241,7 @@ class MoneroWalletService(private val appContext: Context) {
         if (listener == null) {
             Timber.d("start() loadWallet")
             val aWallet = loadWallet(walletName, walletPassword)
-            if (aWallet == null) return null
+            if (aWallet == null) return failedWalletStatus
             val walletStatus = aWallet.getFullStatus()
             if (!walletStatus.isOk) {
                 aWallet.close()
@@ -269,24 +271,30 @@ class MoneroWalletService(private val appContext: Context) {
      * must be called from worker thread to avoid ANR
      */
     @WorkerThread
-    fun stop(saveWallet: Boolean = true) {
+    fun stop(saveWallet: Boolean = true): Boolean {
         isStopping = true
         Timber.d("stop()")
 
         setObserver(null) // in case it was not reset already
-        if (listener != null) {
-            listener?.stop()
-            val myWallet = wallet
+        listener?.stop()
+        val myWallet = wallet
+        val closed = if (myWallet != null) {
             Timber.d("stop() closing")
             // JNI closeJ stores separately (with SIGSEGV protection), then
             // closes without store — which joins the refresh thread via stop()/deinit().
-            myWallet?.close(saveWallet)
-            Timber.d("stop() closed")
+            val result = myWallet.close(saveWallet)
+            Timber.d("stop() closed=%b", result)
+            result
+        } else {
+            true
+        }
+        if (closed) {
             listener = null
         }
-        running = false
+        running = !closed
         isStopping = false
-        isPaused = false
+        isPaused = !closed
+        return closed
     }
 
     /**
@@ -488,6 +496,7 @@ class MoneroWalletService(private val appContext: Context) {
             showProgress(55)
             if (!wallet.init(0)) {
                 Timber.e("wallet.init failed")
+                failedWalletStatus = wallet.getFullStatus()
                 wallet.close()
                 return null
             }
@@ -516,6 +525,7 @@ class MoneroWalletService(private val appContext: Context) {
             val walletStatus = wallet.getStatus()
             if (!walletStatus.isOk()) {
                 Timber.d("wallet status is %s", walletStatus)
+                failedWalletStatus = walletStatus
                 WalletManager.getInstance().close(wallet) // TODO close() failed?
                 if (walletStatus.status == Wallet.StatusEnum.Status_Critical) {
                     throw WalletCorruptedException(walletStatus.errorString)

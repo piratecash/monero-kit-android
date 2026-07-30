@@ -15,7 +15,10 @@
  */
 
 #include <inttypes.h>
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <signal.h>
 #include <setjmp.h>
@@ -136,6 +139,34 @@ static jclass class_Ledger;
 static jclass class_WalletStatus;
 static jclass class_BluetoothService;
 static jclass class_SidekickService;
+static jclass class_ExternalSignerNativeBridge;
+static jclass class_ExternalSignerException;
+static jclass class_HardwareWalletErrorCode;
+static jmethodID method_ExternalSigner_currentGeneration;
+static jmethodID method_ExternalSigner_currentSessionId;
+static jmethodID method_ExternalSigner_writePacket;
+static jmethodID method_ExternalSigner_readPacket;
+static jmethodID method_ExternalSigner_cancel;
+static jmethodID method_ExternalSignerException_getHardwareErrorCode;
+static jmethodID method_HardwareWalletErrorCode_getCode;
+static jmethodID method_HardwareWalletErrorCode_fromCode;
+static jmethodID constructor_ExternalSignerException;
+static std::atomic<size_t> javaCallbacks(0);
+
+class JavaCallbackScope {
+public:
+    JavaCallbackScope() {
+        javaCallbacks.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    ~JavaCallbackScope() {
+        javaCallbacks.fetch_sub(1, std::memory_order_acq_rel);
+    }
+};
+
+extern "C" bool monero_external_signer_callback_active() {
+    return javaCallbacks.load(std::memory_order_acquire) > 0;
+}
 
 std::mutex _listenerMutex;
 
@@ -176,6 +207,56 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
             jenv->FindClass("com/m2049r/xmrwallet/model/Wallet$Status")));
     class_BluetoothService = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("com/m2049r/xmrwallet/service/BluetoothService")));
+    class_ExternalSignerNativeBridge = static_cast<jclass>(jenv->NewGlobalRef(
+            jenv->FindClass("com/piratecash/monero/signer/ExternalSignerNativeBridge")));
+    class_ExternalSignerException = static_cast<jclass>(jenv->NewGlobalRef(
+            jenv->FindClass("com/piratecash/monero/signer/ExternalSignerException")));
+    class_HardwareWalletErrorCode = static_cast<jclass>(jenv->NewGlobalRef(
+            jenv->FindClass("com/piratecash/monero/signer/HardwareWalletErrorCode")));
+    if (jenv->ExceptionCheck()
+            || class_ExternalSignerNativeBridge == nullptr
+            || class_ExternalSignerException == nullptr
+            || class_HardwareWalletErrorCode == nullptr) {
+        jenv->ExceptionClear();
+        return JNI_ERR;
+    }
+    method_ExternalSigner_currentGeneration = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "currentGeneration", "()J");
+    method_ExternalSigner_currentSessionId = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "currentSessionId", "(J)[B");
+    method_ExternalSigner_writePacket = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "writePacket", "(J[B)V");
+    method_ExternalSigner_readPacket = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "readPacket", "(JJ)[B");
+    method_ExternalSigner_cancel = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "cancel", "(J)V");
+    method_ExternalSignerException_getHardwareErrorCode = jenv->GetMethodID(
+            class_ExternalSignerException,
+            "getHardwareErrorCode",
+            "()Lcom/piratecash/monero/signer/HardwareWalletErrorCode;");
+    method_HardwareWalletErrorCode_getCode = jenv->GetMethodID(
+            class_HardwareWalletErrorCode, "getCode", "()I");
+    method_HardwareWalletErrorCode_fromCode = jenv->GetStaticMethodID(
+            class_HardwareWalletErrorCode,
+            "fromCode",
+            "(I)Lcom/piratecash/monero/signer/HardwareWalletErrorCode;");
+    constructor_ExternalSignerException = jenv->GetMethodID(
+            class_ExternalSignerException,
+            "<init>",
+            "(Lcom/piratecash/monero/signer/HardwareWalletErrorCode;Ljava/lang/String;Ljava/lang/Throwable;)V");
+    if (jenv->ExceptionCheck()
+            || method_ExternalSigner_currentGeneration == nullptr
+            || method_ExternalSigner_currentSessionId == nullptr
+            || method_ExternalSigner_writePacket == nullptr
+            || method_ExternalSigner_readPacket == nullptr
+            || method_ExternalSigner_cancel == nullptr
+            || method_ExternalSignerException_getHardwareErrorCode == nullptr
+            || method_HardwareWalletErrorCode_getCode == nullptr
+            || method_HardwareWalletErrorCode_fromCode == nullptr
+            || constructor_ExternalSignerException == nullptr) {
+        jenv->ExceptionClear();
+        return JNI_ERR;
+    }
     return JNI_VERSION_1_6;
 }
 #ifdef __cplusplus
@@ -206,6 +287,417 @@ void detachJVM(JNIEnv *jenv, int envStat) {
     if (envStat == JNI_EDETACHED) {
         cachedJVM->DetachCurrentThread();
     }
+}
+
+static thread_local jint external_signer_error_code = 0;
+
+static jint capture_external_signer_exception(JNIEnv *env) {
+    jthrowable throwable = env->ExceptionOccurred();
+    if (throwable == nullptr) {
+        return 25;
+    }
+    env->ExceptionClear();
+
+    jint code = 25;
+    if (env->IsInstanceOf(throwable, class_ExternalSignerException)) {
+        jobject error = env->CallObjectMethod(
+                throwable, method_ExternalSignerException_getHardwareErrorCode);
+        if (!env->ExceptionCheck() && error != nullptr) {
+            code = env->CallIntMethod(error, method_HardwareWalletErrorCode_getCode);
+            env->DeleteLocalRef(error);
+        }
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        code = 25;
+    }
+    env->DeleteLocalRef(throwable);
+    return code;
+}
+
+static jint record_external_signer_error(jint code) {
+    if (external_signer_error_code == 0) {
+        external_signer_error_code = code;
+    }
+    return code;
+}
+
+static void record_external_signer_primary_error(jint code) {
+    external_signer_error_code = code;
+}
+
+static void begin_external_signer_operation() {
+    external_signer_error_code = 0;
+}
+
+static bool throw_external_signer_error(JNIEnv *env) {
+    jint code = external_signer_error_code;
+    external_signer_error_code = 0;
+    if (code == 0) {
+        return false;
+    }
+
+    jobject error = env->CallStaticObjectMethod(
+            class_HardwareWalletErrorCode,
+            method_HardwareWalletErrorCode_fromCode,
+            code);
+    if (env->ExceptionCheck() || error == nullptr) {
+        return true;
+    }
+    jstring message = env->NewStringUTF("External signer operation failed");
+    if (message == nullptr) {
+        env->DeleteLocalRef(error);
+        return true;
+    }
+    jthrowable exception = static_cast<jthrowable>(env->NewObject(
+            class_ExternalSignerException,
+            constructor_ExternalSignerException,
+            error,
+            message,
+            nullptr));
+    env->DeleteLocalRef(message);
+    env->DeleteLocalRef(error);
+    if (exception == nullptr) {
+        return true;
+    }
+    env->Throw(exception);
+    env->DeleteLocalRef(exception);
+    return true;
+}
+
+static bool complete_external_signer_wallet_operation(
+        JNIEnv *env,
+        Monero::Wallet *wallet) {
+    jint code = external_signer_error_code;
+    if (code == 0) {
+        return false;
+    }
+    if (wallet != nullptr) {
+        external_signer_error_code = 0;
+        if (wallet->hardwareWalletErrorCode() == 0) {
+            wallet->setHardwareWalletError(code, "External signer operation failed");
+        }
+        return false;
+    }
+    return throw_external_signer_error(env);
+}
+
+static bool wallet_uses_external_signer(
+        Monero::WalletManager *wallet_manager,
+        const std::string &keys_file_name,
+        const std::string &password) {
+    Monero::Wallet::Device device_type = Monero::Wallet::Device_Software;
+    try {
+        return wallet_manager->queryWalletDevice(device_type, keys_file_name, password)
+                && device_type == Monero::Wallet::Device_Trezor;
+    } catch (const std::exception &error) {
+        LOGW("Unable to query wallet device before opening: %s", error.what());
+    } catch (...) {
+        LOGW("Unable to query wallet device before opening");
+    }
+    return false;
+}
+
+extern "C" int monero_external_signer_current_generation(int64_t *generation) {
+    if (generation == nullptr) {
+        return record_external_signer_error(25);
+    }
+
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        return record_external_signer_error(25);
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        return record_external_signer_error(25);
+    }
+
+    jlong value = env->CallStaticLongMethod(
+            class_ExternalSignerNativeBridge,
+            method_ExternalSigner_currentGeneration);
+    jint result = env->ExceptionCheck()
+            ? capture_external_signer_exception(env)
+            : 0;
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    if (result == 0) {
+        *generation = static_cast<int64_t>(value);
+    }
+    return result == 0 ? 0 : record_external_signer_error(result);
+}
+
+extern "C" int monero_external_signer_validate_generation(int64_t generation) {
+    int64_t current_generation = 0;
+    int result = monero_external_signer_current_generation(&current_generation);
+    if (result != 0) {
+        return result;
+    }
+    return current_generation == generation ? 0 : record_external_signer_error(10);
+}
+
+struct ExternalSignerTransactionOperation {
+    bool active = false;
+    int64_t generation = 0;
+};
+
+static bool begin_external_signer_transaction(
+        JNIEnv *env,
+        Monero::Wallet *wallet,
+        ExternalSignerTransactionOperation &operation) {
+    operation.active = wallet->getDeviceType() == Monero::Wallet::Device_Trezor;
+    if (!operation.active) {
+        return true;
+    }
+    begin_external_signer_operation();
+    if (monero_external_signer_current_generation(&operation.generation) == 0) {
+        return true;
+    }
+    throw_external_signer_error(env);
+    return false;
+}
+
+static bool complete_external_signer_transaction(
+        JNIEnv *env,
+        Monero::Wallet *wallet,
+        const ExternalSignerTransactionOperation &operation,
+        Monero::PendingTransaction *transaction) {
+    if (!operation.active) {
+        return true;
+    }
+    const jint hardware_error_code = wallet->hardwareWalletErrorCode();
+    if (hardware_error_code != 0) {
+        record_external_signer_primary_error(hardware_error_code);
+    }
+    monero_external_signer_validate_generation(operation.generation);
+    if (!throw_external_signer_error(env)) {
+        return true;
+    }
+    if (transaction != nullptr) {
+        wallet->disposeTransaction(transaction);
+    }
+    return false;
+}
+
+extern "C" int monero_external_signer_read_session_id(
+        int64_t generation,
+        void *session_id,
+        size_t capacity,
+        size_t *session_id_size) {
+    if (session_id_size == nullptr || (session_id == nullptr && capacity != 0)) {
+        return record_external_signer_error(11);
+    }
+
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        return record_external_signer_error(25);
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        return record_external_signer_error(25);
+    }
+
+    jbyteArray java_session_id = static_cast<jbyteArray>(env->CallStaticObjectMethod(
+            class_ExternalSignerNativeBridge,
+            method_ExternalSigner_currentSessionId,
+            static_cast<jlong>(generation)));
+    jint result = 0;
+    if (env->ExceptionCheck()) {
+        result = capture_external_signer_exception(env);
+    } else if (java_session_id == nullptr) {
+        result = 25;
+    } else {
+        const size_t required = static_cast<size_t>(env->GetArrayLength(java_session_id));
+        *session_id_size = required;
+        jbyte *java_bytes = env->GetByteArrayElements(java_session_id, nullptr);
+        if (java_bytes == nullptr) {
+            result = env->ExceptionCheck()
+                    ? capture_external_signer_exception(env)
+                    : 25;
+        } else {
+            if (session_id != nullptr && capacity >= required) {
+                std::memcpy(session_id, java_bytes, required);
+            } else if (session_id != nullptr || capacity != 0) {
+                result = 11;
+            }
+            std::memset(java_bytes, 0, required);
+            env->ReleaseByteArrayElements(java_session_id, java_bytes, 0);
+            if (env->ExceptionCheck()) {
+                result = capture_external_signer_exception(env);
+            }
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    return result == 0 ? 0 : record_external_signer_error(result);
+}
+
+extern "C" int monero_external_signer_write_packet(
+        int64_t generation, const void *packet, size_t packet_size) {
+    if (packet == nullptr || packet_size != 64) {
+        return record_external_signer_error(11);
+    }
+
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        return record_external_signer_error(25);
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        return record_external_signer_error(25);
+    }
+
+    jbyteArray java_packet = env->NewByteArray(static_cast<jsize>(packet_size));
+    if (java_packet != nullptr) {
+        env->SetByteArrayRegion(
+                java_packet,
+                0,
+                static_cast<jsize>(packet_size),
+                static_cast<const jbyte *>(packet));
+        if (!env->ExceptionCheck()) {
+            JavaCallbackScope callback_scope;
+            env->CallStaticVoidMethod(
+                    class_ExternalSignerNativeBridge,
+                    method_ExternalSigner_writePacket,
+                    static_cast<jlong>(generation),
+                    java_packet);
+        }
+    }
+    jint result = env->ExceptionCheck()
+            ? capture_external_signer_exception(env)
+            : java_packet == nullptr ? 25 : 0;
+    if (java_packet != nullptr) {
+        jbyte *java_bytes = env->GetByteArrayElements(java_packet, nullptr);
+        if (java_bytes == nullptr) {
+            if (result == 0) {
+                result = env->ExceptionCheck()
+                        ? capture_external_signer_exception(env)
+                        : 25;
+            } else if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        } else {
+            std::memset(java_bytes, 0, packet_size);
+            env->ReleaseByteArrayElements(java_packet, java_bytes, 0);
+            if (env->ExceptionCheck()) {
+                if (result == 0) {
+                    result = capture_external_signer_exception(env);
+                } else {
+                    env->ExceptionClear();
+                }
+            }
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    return result == 0 ? 0 : record_external_signer_error(result);
+}
+
+extern "C" int monero_external_signer_read_packet(
+        int64_t generation,
+        int64_t deadline_nanos,
+        void *packet,
+        size_t packet_size) {
+    if (packet == nullptr || packet_size != 64) {
+        return record_external_signer_error(11);
+    }
+
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        return record_external_signer_error(25);
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        return record_external_signer_error(25);
+    }
+
+    jbyteArray java_packet;
+    {
+        JavaCallbackScope callback_scope;
+        java_packet = static_cast<jbyteArray>(env->CallStaticObjectMethod(
+                class_ExternalSignerNativeBridge,
+                method_ExternalSigner_readPacket,
+                static_cast<jlong>(generation),
+                static_cast<jlong>(deadline_nanos)));
+    }
+    jint result = 0;
+    if (env->ExceptionCheck()) {
+        result = capture_external_signer_exception(env);
+    } else if (java_packet == nullptr || env->GetArrayLength(java_packet) != 64) {
+        result = 11;
+    } else {
+        env->GetByteArrayRegion(
+                java_packet,
+                0,
+                static_cast<jsize>(packet_size),
+                static_cast<jbyte *>(packet));
+        if (env->ExceptionCheck()) {
+            result = capture_external_signer_exception(env);
+        }
+    }
+    if (java_packet != nullptr) {
+        const jsize java_packet_size = env->GetArrayLength(java_packet);
+        if (env->ExceptionCheck()) {
+            if (result == 0) {
+                result = capture_external_signer_exception(env);
+            } else {
+                env->ExceptionClear();
+            }
+        } else {
+            jbyte *java_bytes = env->GetByteArrayElements(java_packet, nullptr);
+            if (java_bytes == nullptr) {
+                if (result == 0) {
+                    result = env->ExceptionCheck()
+                            ? capture_external_signer_exception(env)
+                            : 25;
+                } else if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
+            } else {
+                std::memset(java_bytes, 0, static_cast<size_t>(java_packet_size));
+                env->ReleaseByteArrayElements(java_packet, java_bytes, 0);
+                if (env->ExceptionCheck()) {
+                    if (result == 0) {
+                        result = capture_external_signer_exception(env);
+                    } else {
+                        env->ExceptionClear();
+                    }
+                }
+            }
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    return result == 0 ? 0 : record_external_signer_error(result);
+}
+
+extern "C" int monero_external_signer_cancel(int64_t generation) {
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        return record_external_signer_error(25);
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        return record_external_signer_error(25);
+    }
+
+    {
+        JavaCallbackScope callback_scope;
+        env->CallStaticVoidMethod(
+                class_ExternalSignerNativeBridge,
+                method_ExternalSigner_cancel,
+                static_cast<jlong>(generation));
+    }
+    jint result = env->ExceptionCheck()
+            ? capture_external_signer_exception(env)
+            : 0;
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    return result == 0 ? 0 : record_external_signer_error(result);
 }
 
 struct MyWalletListener : Monero::WalletListener {
@@ -338,6 +830,34 @@ struct MyWalletListener : Monero::WalletListener {
 // ---------------------------------------------------------------------------
 
 //// helper methods
+class ScopedUtfChars {
+public:
+    ScopedUtfChars(JNIEnv *env, jstring value)
+            : env(env),
+              value(value),
+              chars(value == nullptr ? nullptr : env->GetStringUTFChars(value, nullptr)) {
+    }
+
+    ~ScopedUtfChars() {
+        if (chars != nullptr) {
+            env->ReleaseStringUTFChars(value, chars);
+        }
+    }
+
+    bool valid() const {
+        return chars != nullptr;
+    }
+
+    std::string string() const {
+        return std::string(chars);
+    }
+
+private:
+    JNIEnv *env;
+    jstring value;
+    const char *chars;
+};
+
 std::vector<std::string> java2cpp(JNIEnv *env, jobject arrayList) {
 
     jmethodID java_util_ArrayList_size = env->GetMethodID(class_ArrayList, "size", "()I");
@@ -412,18 +932,50 @@ JNIEXPORT jlong JNICALL
 Java_com_m2049r_xmrwallet_model_WalletManager_openWalletJ(JNIEnv *env, jobject instance,
                                                           jstring path, jstring password,
                                                           jint networkType) {
-    const char *_path = env->GetStringUTFChars(path, nullptr);
-    const char *_password = env->GetStringUTFChars(password, nullptr);
-    Monero::NetworkType _networkType = static_cast<Monero::NetworkType>(networkType);
+    ScopedUtfChars wallet_path(env, path);
+    ScopedUtfChars wallet_password(env, password);
+    if (!wallet_path.valid() || !wallet_password.valid()) {
+        if (!env->ExceptionCheck()) {
+            ThrowException(
+                    env,
+                    "java/lang/IllegalArgumentException",
+                    "Wallet path and password are required");
+        }
+        return 0;
+    }
 
-    Monero::Wallet *wallet =
-            Monero::WalletManagerFactory::getWalletManager()->openWallet(
-                    std::string(_path),
-                    std::string(_password),
-                    _networkType);
-
-    env->ReleaseStringUTFChars(path, _path);
-    env->ReleaseStringUTFChars(password, _password);
+    begin_external_signer_operation();
+    Monero::Wallet *wallet = nullptr;
+    int64_t signer_generation = 0;
+    try {
+        const std::string path_value = wallet_path.string();
+        const std::string password_value = wallet_password.string();
+        Monero::WalletManager *wallet_manager =
+                Monero::WalletManagerFactory::getWalletManager();
+        const bool uses_external_signer = wallet_uses_external_signer(
+                wallet_manager,
+                path_value + ".keys",
+                password_value);
+        if (!uses_external_signer
+                || monero_external_signer_current_generation(&signer_generation) == 0) {
+            wallet = wallet_manager->openWallet(
+                    path_value,
+                    password_value,
+                    static_cast<Monero::NetworkType>(networkType));
+            if (uses_external_signer) {
+                monero_external_signer_validate_generation(signer_generation);
+            }
+        }
+    } catch (const std::exception &error) {
+        LOGE("openWalletJ failed: %s", error.what());
+        record_external_signer_error(25);
+    } catch (...) {
+        LOGE("openWalletJ failed with an unknown exception");
+        record_external_signer_error(25);
+    }
+    if (complete_external_signer_wallet_operation(env, wallet)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(wallet);
 }
 
@@ -504,25 +1056,53 @@ Java_com_m2049r_xmrwallet_model_WalletManager_createWalletFromDeviceJ(JNIEnv *en
                                                                       jstring deviceName,
                                                                       jlong restoreHeight,
                                                                       jstring subaddressLookahead) {
-    const char *_path = env->GetStringUTFChars(path, nullptr);
-    const char *_password = env->GetStringUTFChars(password, nullptr);
-    Monero::NetworkType _networkType = static_cast<Monero::NetworkType>(networkType);
-    const char *_deviceName = env->GetStringUTFChars(deviceName, nullptr);
-    const char *_subaddressLookahead = env->GetStringUTFChars(subaddressLookahead, nullptr);
+    ScopedUtfChars wallet_path(env, path);
+    ScopedUtfChars wallet_password(env, password);
+    ScopedUtfChars device_name(env, deviceName);
+    ScopedUtfChars subaddress_lookahead(env, subaddressLookahead);
+    if (!wallet_path.valid()
+            || !wallet_password.valid()
+            || !device_name.valid()
+            || !subaddress_lookahead.valid()) {
+        if (!env->ExceptionCheck()) {
+            ThrowException(
+                    env,
+                    "java/lang/IllegalArgumentException",
+                    "Device wallet arguments are required");
+        }
+        return 0;
+    }
 
-    Monero::Wallet *wallet =
-            Monero::WalletManagerFactory::getWalletManager()->createWalletFromDevice(
-                    std::string(_path),
-                    std::string(_password),
-                    _networkType,
-                    std::string(_deviceName),
-                    (uint64_t) restoreHeight,
-                    std::string(_subaddressLookahead));
-
-    env->ReleaseStringUTFChars(path, _path);
-    env->ReleaseStringUTFChars(password, _password);
-    env->ReleaseStringUTFChars(deviceName, _deviceName);
-    env->ReleaseStringUTFChars(subaddressLookahead, _subaddressLookahead);
+    begin_external_signer_operation();
+    Monero::Wallet *wallet = nullptr;
+    int64_t signer_generation = 0;
+    try {
+        const std::string device_name_value = device_name.string();
+        const bool uses_external_signer = device_name_value == "Trezor";
+        if (!uses_external_signer
+                || monero_external_signer_current_generation(&signer_generation) == 0) {
+            wallet =
+                    Monero::WalletManagerFactory::getWalletManager()->createWalletFromDevice(
+                            wallet_path.string(),
+                            wallet_password.string(),
+                            static_cast<Monero::NetworkType>(networkType),
+                            device_name_value,
+                            static_cast<uint64_t>(restoreHeight),
+                            subaddress_lookahead.string());
+            if (uses_external_signer) {
+                monero_external_signer_validate_generation(signer_generation);
+            }
+        }
+    } catch (const std::exception &error) {
+        LOGE("createWalletFromDeviceJ failed: %s", error.what());
+        record_external_signer_error(25);
+    } catch (...) {
+        LOGE("createWalletFromDeviceJ failed with an unknown exception");
+        record_external_signer_error(25);
+    }
+    if (complete_external_signer_wallet_operation(env, wallet)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(wallet);
 }
 
@@ -840,11 +1420,20 @@ Java_com_m2049r_xmrwallet_model_Wallet_getStatusJ(JNIEnv *env, jobject instance)
     return wallet->status();
 }
 
-jobject newWalletStatusInstance(JNIEnv *env, int status, const std::string &errorString) {
+jobject newWalletStatusInstance(
+        JNIEnv *env,
+        int status,
+        const std::string &errorString,
+        int hardwareWalletErrorCode) {
     jmethodID init = env->GetMethodID(class_WalletStatus, "<init>",
-                                      "(ILjava/lang/String;)V");
+                                      "(ILjava/lang/String;I)V");
     jstring _errorString = env->NewStringUTF(errorString.c_str());
-    jobject instance = env->NewObject(class_WalletStatus, init, status, _errorString);
+    jobject instance = env->NewObject(
+            class_WalletStatus,
+            init,
+            status,
+            _errorString,
+            hardwareWalletErrorCode);
     env->DeleteLocalRef(_errorString);
     return instance;
 }
@@ -862,7 +1451,11 @@ Java_com_m2049r_xmrwallet_model_Wallet_statusWithErrorString(JNIEnv *env, jobjec
     std::string errorString;
     wallet->statusWithErrorString(status, errorString);
 
-    return newWalletStatusInstance(env, status, errorString);
+    return newWalletStatusInstance(
+            env,
+            status,
+            errorString,
+            wallet->hardwareWalletErrorCode());
 }
 
 JNIEXPORT jboolean JNICALL
@@ -890,6 +1483,56 @@ Java_com_m2049r_xmrwallet_model_Wallet_getAddressJ(JNIEnv *env, jobject instance
     }
     return env->NewStringUTF(
             wallet->address((uint32_t) accountIndex, (uint32_t) addressIndex).c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_deviceShowAddressJ(
+        JNIEnv *env,
+        jobject instance,
+        jint account_index,
+        jint address_index,
+        jstring payment_id) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        ThrowException(env, "java/lang/IllegalStateException", "Monero wallet is closed");
+        return;
+    }
+    if (wallet->getDeviceType() != Monero::Wallet::Device_Trezor) {
+        ThrowException(
+                env,
+                "java/lang/IllegalStateException",
+                "Address display requires a Trezor wallet");
+        return;
+    }
+    ScopedUtfChars paymentId(env, payment_id);
+    if (!paymentId.valid()) {
+        if (!env->ExceptionCheck()) {
+            ThrowException(env, "java/lang/IllegalArgumentException", "Payment ID is required");
+        }
+        return;
+    }
+
+    begin_external_signer_operation();
+    int64_t signer_generation = 0;
+    if (monero_external_signer_current_generation(&signer_generation) != 0) {
+        throw_external_signer_error(env);
+        return;
+    }
+    wallet->deviceShowAddress(
+            static_cast<uint32_t>(account_index),
+            static_cast<uint32_t>(address_index),
+            paymentId.string());
+    const int hardware_error_code = wallet->hardwareWalletErrorCode();
+    if (hardware_error_code != 0) {
+        record_external_signer_primary_error(hardware_error_code);
+    }
+    monero_external_signer_validate_generation(signer_generation);
+    if (throw_external_signer_error(env)) {
+        return;
+    }
+    if (wallet->status() != Monero::Wallet::Status_Ok) {
+        ThrowException(env, "java/lang/IllegalStateException", wallet->errorString().c_str());
+    }
 }
 
 JNIEXPORT jstring JNICALL
@@ -1311,6 +1954,18 @@ Java_com_m2049r_xmrwallet_model_Wallet_pauseRefresh(JNIEnv *env, jobject instanc
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_pauseRefreshAndDrain(
+        JNIEnv *env,
+        jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return JNI_FALSE;
+    }
+    return static_cast<jboolean>(wallet->pauseRefreshAndDrain());
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_refresh(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
@@ -1343,6 +1998,69 @@ Java_com_m2049r_xmrwallet_model_Wallet_rescanBlockchainAsyncJ(JNIEnv *env, jobje
     wallet->rescanBlockchainAsync();
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_hasUnknownKeyImages(
+        JNIEnv *env,
+        jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return JNI_FALSE;
+    }
+    return static_cast<jboolean>(wallet->hasUnknownKeyImages());
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_coldKeyImageSyncJ(
+        JNIEnv *env,
+        jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        ThrowException(env, "java/lang/IllegalStateException", "Monero wallet is closed");
+        return nullptr;
+    }
+    if (wallet->getDeviceType() != Monero::Wallet::Device_Trezor) {
+        ThrowException(
+                env,
+                "java/lang/IllegalStateException",
+                "Cold key image sync requires a Trezor wallet");
+        return nullptr;
+    }
+
+    begin_external_signer_operation();
+    int64_t signer_generation = 0;
+    if (monero_external_signer_current_generation(&signer_generation) != 0) {
+        throw_external_signer_error(env);
+        return nullptr;
+    }
+    uint64_t spent = 0;
+    uint64_t unspent = 0;
+    uint64_t height = wallet->coldKeyImageSync(spent, unspent);
+    const int hardware_error_code = wallet->hardwareWalletErrorCode();
+    if (hardware_error_code != 0) {
+        record_external_signer_primary_error(hardware_error_code);
+    }
+    monero_external_signer_validate_generation(signer_generation);
+    if (throw_external_signer_error(env)) {
+        return nullptr;
+    }
+    if (wallet->status() != Monero::Wallet::Status_Ok) {
+        ThrowException(env, "java/lang/IllegalStateException", wallet->errorString().c_str());
+        return nullptr;
+    }
+
+    jlong values[] = {
+            static_cast<jlong>(height),
+            static_cast<jlong>(spent),
+            static_cast<jlong>(unspent),
+    };
+    jlongArray result = env->NewLongArray(3);
+    if (result != nullptr) {
+        env->SetLongArrayRegion(result, 0, 3, values);
+    }
+    return result;
+}
+
 
 //TODO virtual void setAutoRefreshInterval(int millis) = 0;
 //TODO virtual int autoRefreshInterval() const = 0;
@@ -1356,6 +2074,16 @@ Java_com_m2049r_xmrwallet_model_Wallet_createTransactionMultDest(JNIEnv *env, jo
                                                                  jint priority,
                                                                  jint accountIndex,
                                                                  jintArray subaddresses) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return 0;
+    }
+    ExternalSignerTransactionOperation signer_operation;
+    if (!begin_external_signer_transaction(env, wallet, signer_operation)) {
+        return 0;
+    }
+
     std::vector<std::string> dst_addr;
     std::vector<uint64_t> amount;
 
@@ -1386,13 +2114,6 @@ Java_com_m2049r_xmrwallet_model_Wallet_createTransactionMultDest(JNIEnv *env, jo
     Monero::PendingTransaction::Priority _priority =
             static_cast<Monero::PendingTransaction::Priority>(priority);
 
-    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
-    if (wallet == nullptr) {
-        LOGE("wallet handle is null in %s", __FUNCTION__);
-        env->ReleaseStringUTFChars(payment_id, _payment_id);
-        return 0;
-    }
-
     Monero::PendingTransaction *tx =
             wallet->createTransactionMultDest(dst_addr, _payment_id,
                                               amount, (uint32_t) mixin_count,
@@ -1401,6 +2122,9 @@ Java_com_m2049r_xmrwallet_model_Wallet_createTransactionMultDest(JNIEnv *env, jo
                                               subaddr_indices);
 
     env->ReleaseStringUTFChars(payment_id, _payment_id);
+    if (!complete_external_signer_transaction(env, wallet, signer_operation, tx)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(tx);
 }
 
@@ -1416,6 +2140,10 @@ Java_com_m2049r_xmrwallet_model_Wallet_createTransactionJ(JNIEnv *env, jobject i
         LOGE("wallet handle is null in %s", __FUNCTION__);
         return 0;
     }
+    ExternalSignerTransactionOperation signer_operation;
+    if (!begin_external_signer_transaction(env, wallet, signer_operation)) {
+        return 0;
+    }
     const char *_dst_addr = env->GetStringUTFChars(dst_addr, nullptr);
     const char *_payment_id = env->GetStringUTFChars(payment_id, nullptr);
     Monero::PendingTransaction::Priority _priority =
@@ -1428,6 +2156,9 @@ Java_com_m2049r_xmrwallet_model_Wallet_createTransactionJ(JNIEnv *env, jobject i
 
     env->ReleaseStringUTFChars(dst_addr, _dst_addr);
     env->ReleaseStringUTFChars(payment_id, _payment_id);
+    if (!complete_external_signer_transaction(env, wallet, signer_operation, tx)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(tx);
 }
 
@@ -1441,6 +2172,10 @@ Java_com_m2049r_xmrwallet_model_Wallet_createSweepTransaction(JNIEnv *env, jobje
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
+        return 0;
+    }
+    ExternalSignerTransactionOperation signer_operation;
+    if (!begin_external_signer_transaction(env, wallet, signer_operation)) {
         return 0;
     }
     const char *_dst_addr = env->GetStringUTFChars(dst_addr, nullptr);
@@ -1457,6 +2192,9 @@ Java_com_m2049r_xmrwallet_model_Wallet_createSweepTransaction(JNIEnv *env, jobje
 
     env->ReleaseStringUTFChars(dst_addr, _dst_addr);
     env->ReleaseStringUTFChars(payment_id, _payment_id);
+    if (!complete_external_signer_transaction(env, wallet, signer_operation, tx)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(tx);
 }
 
@@ -1468,7 +2206,14 @@ Java_com_m2049r_xmrwallet_model_Wallet_createSweepUnmixableTransactionJ(JNIEnv *
         LOGE("wallet handle is null in %s", __FUNCTION__);
         return 0;
     }
+    ExternalSignerTransactionOperation signer_operation;
+    if (!begin_external_signer_transaction(env, wallet, signer_operation)) {
+        return 0;
+    }
     Monero::PendingTransaction *tx = wallet->createSweepUnmixableTransaction();
+    if (!complete_external_signer_transaction(env, wallet, signer_operation, tx)) {
+        return 0;
+    }
     return reinterpret_cast<jlong>(tx);
 }
 

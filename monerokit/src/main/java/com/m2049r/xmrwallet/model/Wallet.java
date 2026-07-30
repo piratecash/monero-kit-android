@@ -21,6 +21,8 @@ import androidx.annotation.Nullable;
 
 import com.m2049r.xmrwallet.data.Subaddress;
 import com.m2049r.xmrwallet.data.TxData;
+import com.piratecash.monero.signer.ColdKeyImageSyncResult;
+import com.piratecash.monero.signer.HardwareWalletErrorCode;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -43,12 +45,18 @@ public class Wallet {
 
     static public class Status {
         Status(int status, String errorString) {
+            this(status, errorString, 0);
+        }
+
+        Status(int status, String errorString, int hardwareWalletErrorCode) {
             this.status = StatusEnum.values()[status];
             this.errorString = errorString;
+            this.hardwareWalletErrorCode = hardwareWalletErrorCode;
         }
 
         final private StatusEnum status;
         final private String errorString;
+        final private int hardwareWalletErrorCode;
         @Nullable
         private ConnectionStatus connectionStatus; // optional
 
@@ -58,6 +66,11 @@ public class Wallet {
 
         public String getErrorString() {
             return errorString;
+        }
+
+        @Nullable
+        public HardwareWalletErrorCode getHardwareWalletError() {
+            return HardwareWalletErrorCode.fromCodeOrNull(hardwareWalletErrorCode);
         }
 
         public void setConnectionStatus(@Nullable ConnectionStatus connectionStatus) {
@@ -76,7 +89,8 @@ public class Wallet {
         @Override
         @NonNull
         public String toString() {
-            return "Wallet.Status: " + status + "/" + errorString + "/" + connectionStatus;
+            return "Wallet.Status: " + status + "/" + errorString + "/" +
+                    connectionStatus + "/" + getHardwareWalletError();
         }
     }
 
@@ -165,6 +179,15 @@ public class Wallet {
     }
 
     private native String getAddressJ(int accountIndex, int addressIndex);
+
+    public void deviceShowAddress(int accountIndex, int addressIndex, String paymentId) {
+        if (accountIndex < 0 || addressIndex < 0) {
+            throw new IllegalArgumentException("Account and address indices must be non-negative");
+        }
+        deviceShowAddressJ(accountIndex, addressIndex, paymentId);
+    }
+
+    private native void deviceShowAddressJ(int accountIndex, int addressIndex, String paymentId);
 
     public Subaddress getSubaddressObject(int accountIndex, int subAddressIndex) {
         return new Subaddress(accountIndex, subAddressIndex, getSubaddress(subAddressIndex), getSubaddressLabel(subAddressIndex));
@@ -311,6 +334,8 @@ public class Wallet {
 
     public native void pauseRefresh();
 
+    public native boolean pauseRefreshAndDrain();
+
     public native boolean refresh();
 
     public native void refreshAsync();
@@ -321,6 +346,18 @@ public class Wallet {
         synced = false;
         rescanBlockchainAsyncJ();
     }
+
+    public native boolean hasUnknownKeyImages();
+
+    public ColdKeyImageSyncResult coldKeyImageSync() {
+        long[] result = coldKeyImageSyncJ();
+        if (result == null || result.length != 3) {
+            throw new IllegalStateException("Invalid cold key image sync result");
+        }
+        return new ColdKeyImageSyncResult(result[0], result[1], result[2]);
+    }
+
+    private native long[] coldKeyImageSyncJ();
 
 //TODO virtual void setAutoRefreshInterval(int millis) = 0;
 //TODO virtual int autoRefreshInterval() const = 0;
