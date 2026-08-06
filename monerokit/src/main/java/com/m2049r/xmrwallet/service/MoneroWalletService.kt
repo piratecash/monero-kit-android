@@ -413,7 +413,13 @@ class MoneroWalletService(private val appContext: Context) {
         }
     }
 
-    suspend fun submitSignedRawTransaction(raw: ByteArray): RawMoneroBroadcastResult {
+    suspend fun submitSignedRawTransaction(raw: ByteArray): RawMoneroBroadcastResult =
+        submitSignedRawTransaction(raw, null)
+
+    suspend fun submitSignedRawTransaction(
+        raw: ByteArray,
+        preSubmit: (suspend (suspend () -> RawMoneroBroadcastResult) -> RawMoneroBroadcastResult)?,
+    ): RawMoneroBroadcastResult {
         val decoded = SignedMoneroTransactionEnvelope.decode(raw)
         val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
 
@@ -426,12 +432,15 @@ class MoneroWalletService(private val appContext: Context) {
             tempFile = File.createTempFile("pcash-xmr-submit-", ".tx", appContext.cacheDir)
             tempFile.writeBytes(decoded.signedTransactionFile)
 
-            if (!myWallet.submitTransaction(tempFile.absolutePath)) {
-                throw MoneroRawTransactionError.SubmitFailed(myWallet.status.errorString)
-            }
+            val submit = suspend {
+                if (!myWallet.submitTransaction(tempFile.absolutePath)) {
+                    throw MoneroRawTransactionError.SubmitFailed(myWallet.status.errorString)
+                }
 
-            listener?.updated = true
-            RawMoneroBroadcastResult.Submitted(decoded.txId)
+                listener?.updated = true
+                RawMoneroBroadcastResult.Submitted(decoded.txId)
+            }
+            preSubmit?.invoke(submit) ?: submit()
         } finally {
             tempFile?.delete()
         }

@@ -1998,6 +1998,18 @@ Java_com_m2049r_xmrwallet_model_Wallet_rescanBlockchainAsyncJ(JNIEnv *env, jobje
     wallet->rescanBlockchainAsync();
 }
 
+JNIEXPORT void JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_rescanBlockchainAsyncPreserveKeyImagesJ(
+        JNIEnv *env,
+        jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return;
+    }
+    wallet->rescanBlockchainAsyncPreserveKeyImages();
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_hasUnknownKeyImages(
         JNIEnv *env,
@@ -2048,15 +2060,17 @@ Java_com_m2049r_xmrwallet_model_Wallet_coldKeyImageSyncJ(
         ThrowException(env, "java/lang/IllegalStateException", wallet->errorString().c_str());
         return nullptr;
     }
+    const bool spent_status_verified = wallet->trustedDaemon();
 
     jlong values[] = {
             static_cast<jlong>(height),
             static_cast<jlong>(spent),
             static_cast<jlong>(unspent),
+            static_cast<jlong>(spent_status_verified),
     };
-    jlongArray result = env->NewLongArray(3);
+    jlongArray result = env->NewLongArray(4);
     if (result != nullptr) {
-        env->SetLongArrayRegion(result, 0, 3, values);
+        env->SetLongArrayRegion(result, 0, 4, values);
     }
     return result;
 }

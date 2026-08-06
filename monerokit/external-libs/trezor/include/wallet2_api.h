@@ -780,6 +780,12 @@ struct Wallet
     virtual void rescanBlockchainAsync() = 0;
 
     /**
+     * @brief rescanBlockchainAsyncPreserveKeyImages - rescans wallet asynchronously,
+     * preserving imported key images while reconciling transactions with the daemon.
+     */
+    virtual void rescanBlockchainAsyncPreserveKeyImages() = 0;
+
+    /**
      * @brief setAutoRefreshInterval - setup interval for automatic refresh.
      * @param seconds - interval in millis. if zero or less than zero - automatic refresh disabled;
      */

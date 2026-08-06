@@ -347,14 +347,21 @@ public class Wallet {
         rescanBlockchainAsyncJ();
     }
 
+    private native void rescanBlockchainAsyncPreserveKeyImagesJ();
+
+    public void rescanBlockchainAsyncPreserveKeyImages() {
+        synced = false;
+        rescanBlockchainAsyncPreserveKeyImagesJ();
+    }
+
     public native boolean hasUnknownKeyImages();
 
     public ColdKeyImageSyncResult coldKeyImageSync() {
         long[] result = coldKeyImageSyncJ();
-        if (result == null || result.length != 3) {
+        if (result == null || result.length != 4) {
             throw new IllegalStateException("Invalid cold key image sync result");
         }
-        return new ColdKeyImageSyncResult(result[0], result[1], result[2]);
+        return new ColdKeyImageSyncResult(result[0], result[1], result[2], result[3] != 0);
     }
 
     private native long[] coldKeyImageSyncJ();
