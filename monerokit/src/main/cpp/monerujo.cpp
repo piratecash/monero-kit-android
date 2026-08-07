@@ -2858,6 +2858,35 @@ Java_com_m2049r_xmrwallet_model_PendingTransaction_getFirstTxIdJ(JNIEnv *env, jo
         return nullptr;
 }
 
+static jobjectArray newStringArray(JNIEnv *env, const std::vector<std::string> &values) {
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (stringClass == nullptr) return nullptr;
+    jobjectArray array = env->NewObjectArray(static_cast<jsize>(values.size()), stringClass,
+                                             nullptr);
+    env->DeleteLocalRef(stringClass);
+    if (array == nullptr) return nullptr;
+    for (size_t i = 0; i < values.size(); i++) {
+        jstring value = env->NewStringUTF(values[i].c_str());
+        // An exception is already pending here, so no further JNI call would be legal.
+        if (value == nullptr) return nullptr;
+        env->SetObjectArrayElement(array, static_cast<jsize>(i), value);
+        env->DeleteLocalRef(value);
+    }
+    return array;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_m2049r_xmrwallet_model_PendingTransaction_getTxIdsJ(JNIEnv *env, jobject instance) {
+    Monero::PendingTransaction *tx = getHandle<Monero::PendingTransaction>(env, instance);
+    return newStringArray(env, tx->txid());
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_m2049r_xmrwallet_model_PendingTransaction_getTxRawHexJ(JNIEnv *env, jobject instance) {
+    Monero::PendingTransaction *tx = getHandle<Monero::PendingTransaction>(env, instance);
+    return newStringArray(env, tx->txRawHex());
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_m2049r_xmrwallet_model_PendingTransaction_getTxCount(JNIEnv *env, jobject instance) {
     Monero::PendingTransaction *tx = getHandle<Monero::PendingTransaction>(env, instance);

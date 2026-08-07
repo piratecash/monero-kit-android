@@ -96,6 +96,11 @@ struct PendingTransaction
     virtual uint64_t fee() const = 0;
     virtual std::vector<std::string> txid() const = 0;
     /*!
+     * \brief txRawHex - serialized transactions, hex encoded, ready for /sendrawtransaction
+     * \return same order as txid(), so the i-th blob belongs to the i-th txid
+     */
+    virtual std::vector<std::string> txRawHex() const = 0;
+    /*!
      * \brief txCount - number of transactions current transaction will be splitted to
      * \return
      */

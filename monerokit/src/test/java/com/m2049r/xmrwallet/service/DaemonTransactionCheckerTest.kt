@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 
 class DaemonTransactionCheckerTest {
     private val txId = "a".repeat(64)
+    private val secondTxId = "b".repeat(64)
     private lateinit var server: MockWebServer
 
     @Before
@@ -34,7 +35,7 @@ class DaemonTransactionCheckerTest {
     private fun daemonAddress() = "127.0.0.1:${server.port}"
 
     @Test
-    fun checkTransactionExists_slowDaemon_returnsFalseWithinBound() = runBlocking {
+    fun checkKnownTransactions_slowDaemon_returnsEmptyWithinBound() = runBlocking {
         val serverDelayMs = 1500L
         val checkTimeoutMs = 200L
         server.enqueue(
@@ -44,8 +45,8 @@ class DaemonTransactionCheckerTest {
         )
 
         val start = System.currentTimeMillis()
-        val result = DaemonTransactionChecker.checkTransactionExists(
-            txId = txId,
+        val result = DaemonTransactionChecker.checkKnownTransactions(
+            txIds = listOf(txId),
             daemonAddress = daemonAddress(),
             username = "",
             password = "",
@@ -53,7 +54,7 @@ class DaemonTransactionCheckerTest {
         )
         val elapsedMs = System.currentTimeMillis() - start
 
-        assertEquals(false, result)
+        assertEquals(emptySet<String>(), result)
         assertTrue(
             "expected the check to abort well before the ${serverDelayMs}ms server delay, took ${elapsedMs}ms",
             elapsedMs < serverDelayMs,
@@ -61,30 +62,50 @@ class DaemonTransactionCheckerTest {
     }
 
     @Test
-    fun checkTransactionExists_txIdInResponse_returnsTrue() = runBlocking {
+    fun checkKnownTransactions_txIdInResponse_returnsQueriedId() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"txs":[{"tx_hash":"$txId"}]}"""))
 
-        val result = DaemonTransactionChecker.checkTransactionExists(
-            txId = txId,
+        val result = DaemonTransactionChecker.checkKnownTransactions(
+            txIds = listOf(txId),
             daemonAddress = daemonAddress(),
             username = "",
             password = "",
         )
 
-        assertEquals(true, result)
+        assertEquals(setOf(txId), result)
     }
 
     @Test
-    fun checkTransactionExists_missedTx_returnsFalse() = runBlocking {
+    fun checkKnownTransactions_missedTx_returnsEmpty() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"status":"OK","missed_tx":["$txId"]}"""))
 
-        val result = DaemonTransactionChecker.checkTransactionExists(
-            txId = txId,
+        val result = DaemonTransactionChecker.checkKnownTransactions(
+            txIds = listOf(txId),
             daemonAddress = daemonAddress(),
             username = "",
             password = "",
         )
 
-        assertEquals(false, result)
+        assertEquals(emptySet<String>(), result)
+    }
+
+    @Test
+    fun checkKnownTransactions_multipleIds_usesOneRequestWithCompleteBatch() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"txs":[{"tx_hash":"$secondTxId"}]}"""))
+        val txIds = listOf(txId, secondTxId)
+
+        val result = DaemonTransactionChecker.checkKnownTransactions(
+            txIds = txIds,
+            daemonAddress = daemonAddress(),
+            username = "",
+            password = "",
+        )
+
+        assertEquals(setOf(secondTxId), result)
+        val request = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals("/get_transactions", request.path)
+        val hashes = org.json.JSONObject(request.body.readUtf8()).getJSONArray("txs_hashes")
+        assertEquals(txIds, (0 until hashes.length()).map(hashes::getString))
+        assertEquals(1, server.requestCount)
     }
 }

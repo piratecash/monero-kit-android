@@ -16,21 +16,21 @@
 package com.m2049r.xmrwallet.service
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import androidx.annotation.WorkerThread
 import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.TxData
 import com.m2049r.xmrwallet.model.PendingTransaction
-import com.m2049r.xmrwallet.model.UnsignedTransaction
 import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.Wallet.ConnectionStatus
 import com.m2049r.xmrwallet.model.WalletListener
 import com.m2049r.xmrwallet.model.WalletManager
 import com.m2049r.xmrwallet.offline.MoneroRawTransactionError
 import com.m2049r.xmrwallet.offline.RawMoneroBroadcastResult
+import com.m2049r.xmrwallet.offline.SignedMoneroTransaction
 import com.m2049r.xmrwallet.offline.SignedMoneroTransactionEnvelope
 import com.m2049r.xmrwallet.offline.SignedRawMoneroTransaction
 import com.m2049r.xmrwallet.util.Helper
-import java.io.File
 import timber.log.Timber
 
 class MoneroWalletService(private val appContext: Context) {
@@ -359,92 +359,46 @@ class MoneroWalletService(private val appContext: Context) {
     fun createSignedRawTransaction(txData: TxData): SignedRawMoneroTransaction {
         val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
         Timber.d("CREATE SIGNED RAW TX for wallet: %s", myWallet.name)
-        var unsignedFile: File? = null
-        var signedFile: File? = null
 
         return try {
             val pendingTransaction = myWallet.createCheckedTransaction(txData) { error ->
                 MoneroRawTransactionError.CreateFailed(error)
             }
+            val transactions = pendingTransaction.toSignedTransactions()
 
-            val txId = pendingTransaction.getFirstTxIdJ()
-                ?: throw MoneroRawTransactionError.CreateFailed("Transaction has no txid")
-            val fee = pendingTransaction.getFee()
-            val txCount = pendingTransaction.getTxCount()
-            unsignedFile = File.createTempFile("pcash-xmr-unsigned-", ".tx", appContext.cacheDir)
-            signedFile = File.createTempFile("pcash-xmr-signed-", ".tx", appContext.cacheDir)
-
-            saveUnsignedTransaction(pendingTransaction, unsignedFile)
-            signUnsignedTransaction(myWallet, unsignedFile, signedFile)
-
-            val signedTransactionFile = signedFile.readBytes()
-            if (signedTransactionFile.isEmpty()) {
-                throw MoneroRawTransactionError.SaveFailed("Signed transaction file is empty")
-            }
-            val raw = SignedMoneroTransactionEnvelope.encode(txId, signedTransactionFile)
-            SignedRawMoneroTransaction(raw, txId, fee, txCount)
+            SignedRawMoneroTransaction(
+                raw = SignedMoneroTransactionEnvelope.encode(transactions),
+                txIds = transactions.map { it.txId },
+                fee = pendingTransaction.getFee(),
+            )
         } finally {
             myWallet.disposePendingTransaction()
-            unsignedFile?.delete()
-            signedFile?.delete()
         }
     }
 
-    private fun saveUnsignedTransaction(pendingTransaction: PendingTransaction, unsignedFile: File) {
-        if (!pendingTransaction.commit(unsignedFile.absolutePath, true)) {
-            throw MoneroRawTransactionError.SaveFailed(pendingTransaction.getErrorString())
+    private fun PendingTransaction.toSignedTransactions(): List<SignedMoneroTransaction> {
+        val txIds = getTxIdsJ()?.toList().orEmpty()
+        val rawHex = getTxRawHexJ()?.toList().orEmpty()
+        if (txIds.isEmpty() || txIds.size != rawHex.size) {
+            throw MoneroRawTransactionError.CreateFailed("Transaction has no serialized data")
+        }
+        return txIds.mapIndexed { index, txId ->
+            SignedMoneroTransaction(txId, Helper.hexToBytes(rawHex[index]))
         }
     }
 
-    private fun signUnsignedTransaction(wallet: Wallet, unsignedFile: File, signedFile: File) {
-        var unsignedTransaction: UnsignedTransaction? = null
-        try {
-            unsignedTransaction = wallet.loadUnsignedTx(unsignedFile.absolutePath)
-                ?: throw MoneroRawTransactionError.SignFailed("Load unsigned transaction failed")
-
-            if (unsignedTransaction.getStatus() != UnsignedTransaction.Status.Status_Ok) {
-                throw MoneroRawTransactionError.SignFailed(unsignedTransaction.getErrorString())
-            }
-            if (!unsignedTransaction.sign(signedFile.absolutePath)) {
-                throw MoneroRawTransactionError.SignFailed(unsignedTransaction.getErrorString())
-            }
-        } finally {
-            unsignedTransaction?.dispose()
-        }
-    }
-
+    /**
+     * Relays the transactions of an offline-signed envelope through the daemon. No wallet key
+     * takes part, so an envelope signed on another device broadcasts here just as well.
+     *
+     * The local wallet learns about the spend on its next refresh rather than from this call.
+     */
     suspend fun submitSignedRawTransaction(raw: ByteArray): RawMoneroBroadcastResult =
-        submitSignedRawTransaction(raw, null)
-
-    suspend fun submitSignedRawTransaction(
-        raw: ByteArray,
-        preSubmit: (suspend (suspend () -> RawMoneroBroadcastResult) -> RawMoneroBroadcastResult)?,
-    ): RawMoneroBroadcastResult {
-        val decoded = SignedMoneroTransactionEnvelope.decode(raw)
-        val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
-
-        if (DaemonTransactionChecker.transactionExistsOnChain(decoded.txId)) {
-            return RawMoneroBroadcastResult.AlreadyKnown(decoded.txId)
-        }
-
-        var tempFile: File? = null
-        return try {
-            tempFile = File.createTempFile("pcash-xmr-submit-", ".tx", appContext.cacheDir)
-            tempFile.writeBytes(decoded.signedTransactionFile)
-
-            val submit = suspend {
-                if (!myWallet.submitTransaction(tempFile.absolutePath)) {
-                    throw MoneroRawTransactionError.SubmitFailed(myWallet.status.errorString)
-                }
-
-                listener?.updated = true
-                RawMoneroBroadcastResult.Submitted(decoded.txId)
-            }
-            preSubmit?.invoke(submit) ?: submit()
-        } finally {
-            tempFile?.delete()
-        }
-    }
+        broadcastEnvelope(
+            raw = raw,
+            knownTransactions = { DaemonTransactionChecker.knownTransactions(it) },
+            send = { DaemonTransactionSender.sendRawTransaction(it) },
+        ).also { if (it is RawMoneroBroadcastResult.Submitted) listener?.updated = true }
 
     private fun Wallet.createCheckedTransaction(
         txData: TxData,
@@ -552,5 +506,26 @@ class MoneroWalletService(private val appContext: Context) {
         var running: Boolean = false
 
         private const val STATUS_UPDATE_INTERVAL: Long = 120000 // 120s (blocktime)
+
+        /**
+         * Sends every transaction the daemon does not know yet, so retrying an envelope whose
+         * earlier transactions already landed still delivers the remaining ones.
+         */
+        @VisibleForTesting
+        internal suspend fun broadcastEnvelope(
+            raw: ByteArray,
+            knownTransactions: suspend (List<String>) -> Set<String>,
+            send: suspend (ByteArray) -> Unit,
+        ): RawMoneroBroadcastResult {
+            val transactions = SignedMoneroTransactionEnvelope.decode(raw)
+            val txId = transactions.first().txId
+            val known = knownTransactions(transactions.map { it.txId })
+            val unsent = transactions.filterNot { it.txId in known }
+
+            if (unsent.isEmpty()) return RawMoneroBroadcastResult.AlreadyKnown(txId)
+
+            unsent.forEach { send(it.blob) }
+            return RawMoneroBroadcastResult.Submitted(txId)
+        }
     }
 }
