@@ -20,6 +20,7 @@ import static com.m2049r.xmrwallet.model.NetworkType.NetworkType_Mainnet;
 
 import androidx.annotation.Nullable;
 
+import com.google.common.net.HostAndPort;
 import com.m2049r.xmrwallet.data.Node;
 import com.m2049r.xmrwallet.util.RestoreHeight;
 
@@ -272,6 +273,7 @@ public class WalletManager {
 //TODO virtual bool checkPayment(const std::string &address, const std::string &txid, const std::string &txkey, const std::string &daemon_address, uint64_t &received, uint64_t &height, std::string &error) const = 0;
 
     private String daemonAddress = null;
+    private String daemonRpcAddress = null;
 
     public NetworkType getNetworkType() {
         return networkType;
@@ -281,6 +283,7 @@ public class WalletManager {
     public void setDaemon(Node node) {
         if (node != null) {
             this.daemonAddress = node.getAddress();
+            this.daemonRpcAddress = HostAndPort.fromParts(node.getHost(), node.getRpcPort()).toString();
             if (networkType != node.getNetworkType())
                 throw new IllegalArgumentException("network type does not match");
             this.daemonUsername = node.getUsername();
@@ -288,6 +291,7 @@ public class WalletManager {
             setDaemonAddressJ(daemonAddress);
         } else {
             this.daemonAddress = null;
+            this.daemonRpcAddress = null;
             this.daemonUsername = "";
             this.daemonPassword = "";
             //setDaemonAddressJ(""); // don't disconnect as monero code blocks for many seconds!
@@ -300,6 +304,13 @@ public class WalletManager {
             throw new IllegalStateException("use setDaemon() to initialise daemon and net first!");
         }
         return this.daemonAddress;
+    }
+
+    public String getDaemonRpcAddress() {
+        if (daemonRpcAddress == null) {
+            throw new IllegalStateException("use setDaemon() to initialise daemon and net first!");
+        }
+        return this.daemonRpcAddress;
     }
 
     private native void setDaemonAddressJ(String address);

@@ -36,7 +36,7 @@ object DaemonTransactionSender {
         val walletManager = WalletManager.getInstance()
         sendRawTransaction(
             blob = blob,
-            daemonAddress = walletManager.getDaemonAddress(),
+            daemonAddress = walletManager.getDaemonRpcAddress(),
             username = walletManager.getDaemonUsername(),
             password = walletManager.getDaemonPassword(),
         )

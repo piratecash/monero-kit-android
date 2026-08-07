@@ -27,7 +27,7 @@ object DaemonTransactionChecker {
         val walletManager = WalletManager.getInstance()
         return checkKnownTransactions(
             txIds = txIds,
-            daemonAddress = walletManager.getDaemonAddress(),
+            daemonAddress = walletManager.getDaemonRpcAddress(),
             username = walletManager.getDaemonUsername(),
             password = walletManager.getDaemonPassword(),
         )
