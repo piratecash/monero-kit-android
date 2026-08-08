@@ -40,6 +40,7 @@ class MoneroWalletService(private val appContext: Context) {
     @Volatile
     private var isPaused = false
     private var failedWalletStatus: Wallet.Status? = null
+    private val controlledRefreshGate = ControlledRefreshSessionGate()
 
     private inner class MyWalletListener : WalletListener {
         var updated: Boolean = true
@@ -54,6 +55,11 @@ class MoneroWalletService(private val appContext: Context) {
 
             wallet.setListener(this)
             wallet.startRefresh()
+        }
+
+        fun attachPaused() {
+            val wallet = wallet ?: return
+            wallet.setListener(this)
         }
 
         fun stop() {
@@ -103,7 +109,11 @@ class MoneroWalletService(private val appContext: Context) {
         private var lastTxCount = 0
 
         override fun newBlock(height: Long) {
-            if (isStopping || isPaused) return
+            if (isStopping) return
+            if (isPaused) {
+                controlledRefreshGate.onPausedNewBlock(height)
+                return
+            }
             val wallet: Wallet? = wallet
             if (wallet == null) {
                 Timber.d("newBlock() wallet is null")
@@ -152,7 +162,8 @@ class MoneroWalletService(private val appContext: Context) {
                 return
             }
             wallet.setSynchronized()
-            if (updated) {
+            val forcedNotification = controlledRefreshGate.consumeRefreshedNotification()
+            if (updated || forcedNotification) {
                 updateDaemonState(wallet, wallet.getBlockChainHeight())
                 wallet.refreshHistory()
 
@@ -240,7 +251,12 @@ class MoneroWalletService(private val appContext: Context) {
         showProgress(10)
         if (listener == null) {
             Timber.d("start() loadWallet")
-            val aWallet = loadWallet(walletName, walletPassword)
+            val aWallet = loadWallet(
+                walletName,
+                walletPassword,
+                closeOnInitFailure = true,
+                closeOnOpenFailure = true,
+            )
             if (aWallet == null) return failedWalletStatus
             val walletStatus = aWallet.getFullStatus()
             if (!walletStatus.isOk) {
@@ -267,6 +283,29 @@ class MoneroWalletService(private val appContext: Context) {
         return walletStatus
     }
 
+    /** Opens a hardware wallet and attaches its listener without starting refresh. */
+    fun startPaused(walletName: String?, walletPassword: String?): Wallet.Status? {
+        isStopping = false
+        isPaused = true
+        failedWalletStatus = null
+        running = true
+        if (listener == null) {
+            val aWallet = loadWallet(
+                walletName,
+                walletPassword,
+                closeOnInitFailure = false,
+                closeOnOpenFailure = false,
+            )
+                ?: return failedWalletStatus
+            listener = MyWalletListener()
+            listener?.attachPaused()
+            val status = aWallet.getFullStatus()
+            observer?.onWalletStarted(status)
+            return status
+        }
+        return wallet?.getFullStatus()
+    }
+
     /***
      * must be called from worker thread to avoid ANR
      */
@@ -275,6 +314,7 @@ class MoneroWalletService(private val appContext: Context) {
         isStopping = true
         Timber.d("stop()")
 
+        controlledRefreshGate.stop()
         setObserver(null) // in case it was not reset already
         listener?.stop()
         val myWallet = wallet
@@ -317,8 +357,17 @@ class MoneroWalletService(private val appContext: Context) {
     fun pause() {
         Timber.d("pause()")
         isPaused = true
+        controlledRefreshGate.cancel()
         setObserver(null)
         listener?.stop()
+    }
+
+    fun setControlledRefreshProgressObserver(observer: ((Long) -> Unit)?) {
+        controlledRefreshGate.setProgressObserver(observer)
+    }
+
+    fun clearControlledRefreshProgressObserver() {
+        controlledRefreshGate.clearProgressObserver()
     }
 
     @WorkerThread
@@ -332,6 +381,17 @@ class MoneroWalletService(private val appContext: Context) {
         setObserver(anObserver)
         listener?.resume()
         Timber.d("resume() done")
+        return true
+    }
+
+    /** Resumes a paused controlled session and guarantees one refreshed callback. */
+    @WorkerThread
+    fun resumeAfterControlledRefresh(anObserver: Observer): Boolean {
+        if (listener == null) return false
+        controlledRefreshGate.resumeAfterControlledRefresh()
+        isPaused = false
+        setObserver(anObserver)
+        listener?.resume()
         return true
     }
 
@@ -452,15 +512,24 @@ class MoneroWalletService(private val appContext: Context) {
         return txid
     }
 
-    private fun loadWallet(walletName: String?, walletPassword: String?): Wallet? {
-        val wallet = openWallet(walletName, walletPassword)
+    private fun loadWallet(
+        walletName: String?,
+        walletPassword: String?,
+        closeOnInitFailure: Boolean,
+        closeOnOpenFailure: Boolean,
+    ): Wallet? {
+        val wallet = openWallet(walletName, walletPassword, closeOnOpenFailure)
         if (wallet != null) {
             Timber.d("Using daemon %s", WalletManager.getInstance().getDaemonAddress())
             showProgress(55)
             if (!wallet.init(0)) {
                 Timber.e("wallet.init failed")
                 failedWalletStatus = wallet.getFullStatus()
-                wallet.close()
+                if (closeOnInitFailure) {
+                    wallet.close()
+                }
+                // Keep an owned paused wallet available for its caller to abort, but
+                // never let later setup replace the failed init status.
                 return null
             }
             wallet.setProxy(NetCipherHelper.getProxy())
@@ -469,7 +538,11 @@ class MoneroWalletService(private val appContext: Context) {
         return wallet
     }
 
-    private fun openWallet(walletName: String?, walletPassword: String?): Wallet? {
+    private fun openWallet(
+        walletName: String?,
+        walletPassword: String?,
+        closeOnFailure: Boolean,
+    ): Wallet? {
         val path = Helper.getWalletFile(appContext, walletName).absolutePath
         showProgress(20)
         var wallet: Wallet? = null
@@ -489,11 +562,15 @@ class MoneroWalletService(private val appContext: Context) {
             if (!walletStatus.isOk()) {
                 Timber.d("wallet status is %s", walletStatus)
                 failedWalletStatus = walletStatus
-                WalletManager.getInstance().close(wallet) // TODO close() failed?
-                if (walletStatus.status == Wallet.StatusEnum.Status_Critical) {
+                if (closeOnFailure) {
+                    WalletManager.getInstance().close(wallet) // TODO close() failed?
+                }
+                if (closeOnFailure && walletStatus.status == Wallet.StatusEnum.Status_Critical) {
                     throw WalletCorruptedException(walletStatus.errorString)
                 }
-                wallet = null
+                // A paused caller owns this failed wallet and must receive the
+                // status captured before loadWallet() can call init().
+                return null
                 // TODO what do we do with the progress??
                 // TODO tell the activity this failed
                 // this crashes in MyWalletListener(Wallet aWallet) as wallet == null
@@ -528,4 +605,50 @@ class MoneroWalletService(private val appContext: Context) {
             return RawMoneroBroadcastResult.Submitted(txId)
         }
     }
+}
+
+/**
+ * Listener-side state for a scoped hardware refresh.  It deliberately owns no
+ * wallet state: while paused, blocks may only reach this session's progress UI;
+ * normal daemon/history/readiness callbacks stay in the regular listener.
+ */
+internal class ControlledRefreshSessionGate(
+    private val now: () -> Long = System::currentTimeMillis,
+    private val progressIntervalMs: Long = 500,
+) {
+    private var armed = false
+    private var progressObserver: ((Long) -> Unit)? = null
+    private var lastProgressTime: Long = 0
+
+    fun setProgressObserver(observer: ((Long) -> Unit)?) {
+        progressObserver = observer
+        lastProgressTime = 0
+    }
+
+    fun onPausedNewBlock(height: Long) {
+        val observer = progressObserver ?: return
+        val time = now()
+        if (time - lastProgressTime >= progressIntervalMs) {
+            lastProgressTime = time
+            observer(height)
+        }
+    }
+
+    /** Re-arms exactly one regular refreshed notification after controlled completion. */
+    fun resumeAfterControlledRefresh() {
+        armed = true
+        clearProgressObserver()
+    }
+
+    fun consumeRefreshedNotification(): Boolean = armed.also { armed = false }
+
+    fun clearProgressObserver() {
+        progressObserver = null
+        lastProgressTime = 0
+    }
+
+    fun complete() = clearProgressObserver()
+    fun cancel() = clearProgressObserver()
+    fun fail() = clearProgressObserver()
+    fun stop() = clearProgressObserver()
 }

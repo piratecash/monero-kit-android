@@ -22,6 +22,7 @@ import androidx.annotation.Nullable;
 import com.m2049r.xmrwallet.data.Subaddress;
 import com.m2049r.xmrwallet.data.TxData;
 import com.piratecash.monero.signer.ColdKeyImageSyncResult;
+import com.piratecash.monero.signer.HardwareKeyImageRefreshResult;
 import com.piratecash.monero.signer.HardwareWalletErrorCode;
 
 import java.io.File;
@@ -234,6 +235,16 @@ public class Wallet {
         return storeSafeJ();
     }
 
+    private native int storeWithKeysSafeJ();
+
+    /**
+     * Persists the encrypted keys file before the cache.  The status values are
+     * identical to {@link #storeSafe()}; only zero commits the operation.
+     */
+    public int storeWithKeysSafe() {
+        return storeWithKeysSafeJ();
+    }
+
     public boolean close(boolean store) {
         disposePendingTransaction();
         return WalletManager.getInstance().close(this, store);
@@ -365,6 +376,15 @@ public class Wallet {
     }
 
     private native long[] coldKeyImageSyncJ();
+
+    public HardwareKeyImageRefreshResult refreshWithHardwareKeyImages(
+            HardwareKeyImageRefreshResult.Request request) {
+        if (request == null) throw new IllegalArgumentException("Refresh request is required");
+        long[] result = refreshWithHardwareKeyImagesJ(request.getMode().getNativeValue(), request.getRestoreHeight());
+        return HardwareKeyImageRefreshResult.fromNative(result);
+    }
+
+    private native long[] refreshWithHardwareKeyImagesJ(int mode, long restoreHeight);
 
 //TODO virtual void setAutoRefreshInterval(int millis) = 0;
 //TODO virtual int autoRefreshInterval() const = 0;

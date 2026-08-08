@@ -102,12 +102,12 @@ static void ensure_thread_altstack() {
 // Return: 0 = stored ok; 1 = store() returned false; 2 = SIGSEGV (wallet
 // UNDEFINED, do not touch); 3 = skipped because the signal guard is not
 // installed (non-fatal).
-static int guarded_store(Monero::Wallet *wallet) {
+static int guarded_store(Monero::Wallet *wallet, bool with_keys = false) {
     if (!g_safe_close_ready) return 3;
     ensure_thread_altstack();
     if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
         g_in_safe_close = 1;
-        bool ok = wallet->store("");
+        bool ok = with_keys ? wallet->storeWithKeys() : wallet->store("");
         g_in_safe_close = 0;
         return ok ? 0 : 1;
     } else {
@@ -1639,6 +1639,28 @@ Java_com_m2049r_xmrwallet_model_Wallet_storeSafeJ(JNIEnv *env, jobject instance)
     return s;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_storeWithKeysSafeJ(JNIEnv *env, jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("storeWithKeysSafeJ() wallet is null");
+        return 1;
+    }
+
+    int s = guarded_store(wallet, true);
+    if (s == 2) {
+        MyWalletListener *walletListener = getHandle<MyWalletListener>(env, instance,
+                                                                       "listenerHandle");
+        if (walletListener != nullptr) {
+            walletListener->deleteGlobalJavaRef(env);
+        }
+        env->SetLongField(instance, getHandleField(env, instance, "listenerHandle"), 0);
+        env->SetLongField(instance, getHandleField(env, instance), 0);
+        LOGE("storeWithKeysSafeJ: SIGSEGV during storeWithKeys() — leaking wallet object");
+    }
+    return s;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_getFilename(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
@@ -2073,6 +2095,58 @@ Java_com_m2049r_xmrwallet_model_Wallet_coldKeyImageSyncJ(
         env->SetLongArrayRegion(result, 0, 4, values);
     }
     return result;
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_refreshWithHardwareKeyImagesJ(
+        JNIEnv *env, jobject instance, jint mode, jlong restore_height) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        ThrowException(env, "java/lang/IllegalStateException", "Monero wallet is closed");
+        return nullptr;
+    }
+    if (wallet->getDeviceType() != Monero::Wallet::Device_Trezor) {
+        ThrowException(env, "java/lang/IllegalStateException",
+                       "Hardware key image refresh requires a Trezor wallet");
+        return nullptr;
+    }
+    if (restore_height < 0 || (mode == Monero::HardwareKeyImageRefreshRequest::ResetToRestoreHeight
+            && restore_height == 0)
+            || (mode != Monero::HardwareKeyImageRefreshRequest::Continue
+            && mode != Monero::HardwareKeyImageRefreshRequest::ResetToRestoreHeight)) {
+        ThrowException(env, "java/lang/IllegalArgumentException", "Unknown refresh mode");
+        return nullptr;
+    }
+
+    begin_external_signer_operation();
+    int64_t signer_generation = 0;
+    if (monero_external_signer_current_generation(&signer_generation) != 0) {
+        throw_external_signer_error(env);
+        return nullptr;
+    }
+    Monero::HardwareKeyImageRefreshRequest request;
+    request.mode = static_cast<Monero::HardwareKeyImageRefreshRequest::Mode>(mode);
+    request.restoreHeight = static_cast<uint64_t>(restore_height);
+    Monero::HardwareKeyImageRefreshResult result;
+    const bool success = wallet->refreshWithHardwareKeyImages(request, result);
+    const int hardware_error_code = wallet->hardwareWalletErrorCode();
+    if (hardware_error_code != 0) {
+        record_external_signer_primary_error(hardware_error_code);
+    }
+    monero_external_signer_validate_generation(signer_generation);
+    if (throw_external_signer_error(env)) return nullptr;
+    if (!success || wallet->status() != Monero::Wallet::Status_Ok) {
+        ThrowException(env, "java/lang/IllegalStateException", wallet->errorString().c_str());
+        return nullptr;
+    }
+
+    const jlong values[] = {
+            static_cast<jlong>(result.startHeight), static_cast<jlong>(result.finalHeight),
+            static_cast<jlong>(result.suffixDetached), static_cast<jlong>(result.protocolStarted),
+            static_cast<jlong>(result.finalAckChecked), static_cast<jlong>(wallet->hasUnknownKeyImages())};
+    jlongArray response = env->NewLongArray(6);
+    if (response != nullptr) env->SetLongArrayRegion(response, 0, 6, values);
+    return response;
 }
 
 
