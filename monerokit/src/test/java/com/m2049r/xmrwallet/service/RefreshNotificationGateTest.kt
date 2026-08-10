@@ -1,11 +1,27 @@
 package com.m2049r.xmrwallet.service
 
+import com.m2049r.xmrwallet.model.Wallet
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RefreshNotificationGateTest {
+    @Test
+    fun refreshedWithOkStatus_marksWalletSynchronized() {
+        assertTrue(shouldMarkWalletSynchronizedAfterRefresh(Wallet.StatusEnum.Status_Ok))
+    }
+
+    @Test
+    fun refreshedWithErrorStatus_doesNotMarkWalletSynchronized() {
+        assertFalse(shouldMarkWalletSynchronizedAfterRefresh(Wallet.StatusEnum.Status_Error))
+    }
+
+    @Test
+    fun refreshedWithCriticalStatus_doesNotMarkWalletSynchronized() {
+        assertFalse(shouldMarkWalletSynchronizedAfterRefresh(Wallet.StatusEnum.Status_Critical))
+    }
+
     @Test
     fun resumeAfterControlledRefresh_rearmsExactlyOneRefreshedNotification_withoutUpdatedEvent() {
         val gate = ControlledRefreshSessionGate()

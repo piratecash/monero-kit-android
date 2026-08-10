@@ -161,7 +161,9 @@ class MoneroWalletService(private val appContext: Context) {
                 Timber.d("refreshed() wallet is null")
                 return
             }
-            wallet.setSynchronized()
+            if (shouldMarkWalletSynchronizedAfterRefresh(wallet.getStatus().status)) {
+                wallet.setSynchronized()
+            }
             val forcedNotification = controlledRefreshGate.consumeRefreshedNotification()
             if (updated || forcedNotification) {
                 updateDaemonState(wallet, wallet.getBlockChainHeight())
@@ -606,6 +608,9 @@ class MoneroWalletService(private val appContext: Context) {
         }
     }
 }
+
+internal fun shouldMarkWalletSynchronizedAfterRefresh(status: Wallet.StatusEnum): Boolean =
+    status == Wallet.StatusEnum.Status_Ok
 
 /**
  * Listener-side state for a scoped hardware refresh.  It deliberately owns no
