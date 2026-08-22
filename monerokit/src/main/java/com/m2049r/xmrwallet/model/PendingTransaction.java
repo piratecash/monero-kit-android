@@ -94,6 +94,11 @@ public class PendingTransaction {
 
     public native String getFirstTxIdJ();
 
+    public native String[] getTxIdsJ();
+
+    /** Serialized transactions, hex encoded, in the same order as {@link #getTxIdsJ()}. */
+    public native String[] getTxRawHexJ();
+
     public native long getTxCount();
 
     @Getter

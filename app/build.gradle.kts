@@ -11,11 +11,11 @@ private val localProperties = Properties()
 localProperties.load(FileInputStream(rootProject.file("local.properties")))
 
 android {
-    namespace = "com.piratecash.monero"
+    namespace = "com.piratecash.monero.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.piratecash.monero"
+        applicationId = "com.piratecash.monero.app"
         minSdk = 27
         targetSdk = 35
         versionCode = 1

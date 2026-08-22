@@ -49,6 +49,7 @@ import lombok.Setter;
 import lombok.ToString;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.EventListener;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -98,6 +99,17 @@ public class NetCipherHelper implements StatusCallback {
     }
 
     private OkHttpClient client;
+
+    /**
+     * Passive per-call network observer, default null (no observer). When set, it is attached to
+     * every daemon HTTP call built by {@link Request#getClient(long)} — covering node pings and the
+     * pre-broadcast tx check. Additive: a null factory leaves client behavior unchanged.
+     */
+    private static volatile EventListener.Factory eventListenerFactory;
+
+    public static void setEventListenerFactory(EventListener.Factory factory) {
+        eventListenerFactory = factory;
+    }
 
     private void createTorClient(Intent statusIntent) {
         String orbotStatus = statusIntent.getStringExtra(MyOrbotHelper.EXTRA_STATUS);
@@ -331,31 +343,46 @@ public class NetCipherHelper implements StatusCallback {
         }
 
         public void enqueue(Callback callback) {
-            newCall().enqueue(callback);
+            newCall(0).enqueue(callback);
         }
 
         public Response execute() throws IOException {
-            return newCall().execute();
+            return newCall(0).execute();
         }
 
-        private Call newCall() {
-            return getClient().newCall(getRequest());
+        /**
+         * Builds a {@link Call} for this request, optionally overriding the client's overall
+         * call timeout. Used by callers (e.g. DaemonTransactionChecker) that need a stricter,
+         * dedicated bound without changing the shared client's own timeouts, since the override
+         * is applied to a derived client instance, not the shared one.
+         *
+         * @param callTimeoutMs overall call timeout in milliseconds, or 0 to use the client's default
+         */
+        public Call newCall(long callTimeoutMs) {
+            return getClient(callTimeoutMs).newCall(getRequest());
         }
 
-        private OkHttpClient getClient() {
-            if (mockClient != null) return mockClient; // Unit-test mode
-            final OkHttpClient client = getInstance().client;
-            if ((username != null) && (!username.isEmpty())) {
+        private OkHttpClient getClient(long callTimeoutMs) {
+            final OkHttpClient client = mockClient != null ? mockClient : getInstance().client; // Unit-test mode
+            final boolean hasAuth = (username != null) && (!username.isEmpty());
+            final EventListener.Factory factory = eventListenerFactory;
+            if (callTimeoutMs <= 0 && !hasAuth && factory == null) return client;
+
+            final OkHttpClient.Builder builder = client.newBuilder();
+            if (callTimeoutMs > 0) {
+                builder.callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS);
+            }
+            if (hasAuth) {
                 final DigestAuthenticator authenticator = new DigestAuthenticator(new Credentials(username, password));
                 final Map<String, CachingAuthenticator> authCache = new ConcurrentHashMap<>();
-                return client.newBuilder()
-                        .authenticator(new CachingAuthenticatorDecorator(authenticator, authCache))
-                        .addInterceptor(new AuthenticationCacheInterceptor(authCache))
-                        .build();
+                builder.authenticator(new CachingAuthenticatorDecorator(authenticator, authCache))
+                        .addInterceptor(new AuthenticationCacheInterceptor(authCache));
                 // TODO: maybe cache & reuse the client for these credentials?
-            } else {
-                return client;
             }
+            if (factory != null) {
+                builder.eventListenerFactory(factory);
+            }
+            return builder.build();
         }
 
         private okhttp3.Request getRequest() {

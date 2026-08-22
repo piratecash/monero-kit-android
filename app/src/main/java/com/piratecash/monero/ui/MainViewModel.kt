@@ -21,7 +21,7 @@ import com.m2049r.xmrwallet.util.Helper
 import com.m2049r.xmrwallet.util.KeyStoreHelper
 import com.m2049r.xmrwallet.util.NodePinger
 import com.m2049r.xmrwallet.util.RestoreHeight
-import com.piratecash.monero.BuildConfig
+import com.piratecash.monero.app.BuildConfig
 import com.piratecash.monero.MyApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -338,7 +338,7 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
                     txData.setMixin(wallet.getDefaultMixin())
                     txData.setPriority(PendingTransaction.Priority.Priority_Default)
                     txData.setUserNotes(UserNotes(notes))
-                    walletService.prepareTransaction("send", txData)
+                    walletService.prepareTransaction(txData)
                     walletService.sendTransaction(notes)
                 } catch (e: Exception) {
                     uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = e.message)
@@ -356,28 +356,6 @@ class MainViewModel : ViewModel(), MoneroWalletService.Observer {
         uiState.value = uiState.value.copy(
             state = "Syncing..."
         )
-    }
-
-    override fun onWalletStored(success: Boolean) {
-        Log.d(TAG, "onWalletStored() called with: success = $success")
-    }
-
-    override fun onTransactionCreated(
-        tag: String?,
-        pendingTransaction: PendingTransaction?
-    ) {
-        Log.d(TAG, "onTransactionCreated() called with: tag = $tag, pendingTransaction = $pendingTransaction")
-        uiState.value = uiState.value.copy(isLoadingSending = false)
-    }
-
-    override fun onTransactionSent(txid: String?) {
-        Log.d(TAG, "onTransactionSent() called with: txid = $txid")
-        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = null, addressTo = "", amountTo = "", notesTo = "")
-    }
-
-    override fun onSendTransactionFailed(error: String?) {
-        Log.d(TAG, "onSendTransactionFailed() called with: error = $error")
-        uiState.value = uiState.value.copy(isLoadingSending = false, errorSending = error)
     }
 
     override fun onWalletStarted(walletStatus: Wallet.Status?) {
