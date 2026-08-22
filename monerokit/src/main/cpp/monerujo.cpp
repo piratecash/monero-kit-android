@@ -1258,9 +1258,9 @@ Java_com_m2049r_xmrwallet_model_WalletManager_setProxy(JNIEnv *env, jobject inst
 //TODO static std::tuple<bool, std::string, std::string, std::string, std::string> checkUpdates(const std::string &software, const std::string &subdir);
 
 JNIEXPORT jboolean JNICALL
-Java_com_m2049r_xmrwallet_model_WalletManager_closeJ(JNIEnv *env, jobject instance,
-                                                     jobject walletInstance,
-                                                     jboolean store) {
+Java_com_m2049r_xmrwallet_model_WalletManager_closeNativeJ(JNIEnv *env, jobject instance,
+                                                           jobject walletInstance,
+                                                           jboolean store) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, walletInstance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in closeJ");
@@ -1753,8 +1753,8 @@ Java_com_m2049r_xmrwallet_model_Wallet_setProxy(JNIEnv *env, jobject instance,
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_m2049r_xmrwallet_model_Wallet_getBalance(JNIEnv *env, jobject instance,
-                                                  jint accountIndex) {
+Java_com_m2049r_xmrwallet_model_Wallet_getBalanceJ(JNIEnv *env, jobject instance,
+                                                   jint accountIndex) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
@@ -1764,7 +1764,7 @@ Java_com_m2049r_xmrwallet_model_Wallet_getBalance(JNIEnv *env, jobject instance,
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_m2049r_xmrwallet_model_Wallet_getBalanceAll(JNIEnv *env, jobject instance) {
+Java_com_m2049r_xmrwallet_model_Wallet_getBalanceAllJ(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
@@ -1774,8 +1774,8 @@ Java_com_m2049r_xmrwallet_model_Wallet_getBalanceAll(JNIEnv *env, jobject instan
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_m2049r_xmrwallet_model_Wallet_getUnlockedBalance(JNIEnv *env, jobject instance,
-                                                          jint accountIndex) {
+Java_com_m2049r_xmrwallet_model_Wallet_getUnlockedBalanceJ(JNIEnv *env, jobject instance,
+                                                           jint accountIndex) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
@@ -1785,7 +1785,7 @@ Java_com_m2049r_xmrwallet_model_Wallet_getUnlockedBalance(JNIEnv *env, jobject i
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_m2049r_xmrwallet_model_Wallet_getUnlockedBalanceAll(JNIEnv *env, jobject instance) {
+Java_com_m2049r_xmrwallet_model_Wallet_getUnlockedBalanceAllJ(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);

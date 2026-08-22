@@ -76,23 +76,20 @@ public class WalletManager {
         return managedWallet;
     }
 
-    private void manageWallet(Wallet wallet) {
+    private synchronized void manageWallet(Wallet wallet) {
         Timber.d("Managing %s", wallet.getName());
         managedWallet = wallet;
     }
 
-    private void unmanageWallet(Wallet wallet) {
-        if (wallet == null) {
-            throw new IllegalArgumentException("Cannot unmanage null!");
-        }
-        if (getWallet() == null) {
-            throw new IllegalStateException("No wallet under management!");
-        }
-        if (getWallet() != wallet) {
-            throw new IllegalStateException(wallet.getName() + " not under management!");
-        }
-        Timber.d("Unmanaging %s", managedWallet.getName());
+    private synchronized boolean unmanageWalletIfCurrent(Wallet wallet) {
+        if (managedWallet != wallet) return false;
+        Timber.d("Unmanaging %s", wallet.getName());
         managedWallet = null;
+        return true;
+    }
+
+    private synchronized void restoreManagedWalletIfEmpty(Wallet wallet) {
+        if (managedWallet == null) manageWallet(wallet);
     }
 
     /**
@@ -101,7 +98,7 @@ public class WalletManager {
      * {@code storeSafe()} SIGSEGV, where the wallet's native state is undefined
      * and must not be dereferenced.
      */
-    public void clearManagedWalletIfCurrent(Wallet expected) {
+    public synchronized void clearManagedWalletIfCurrent(Wallet expected) {
         if (managedWallet == expected) {
             managedWallet = null;
         }
@@ -197,19 +194,30 @@ public class WalletManager {
                                                 String subaddressLookahead);
 
 
-    public native boolean closeJ(Wallet wallet, boolean store);
+    private native boolean closeNativeJ(Wallet wallet, boolean store);
+
+    public boolean closeJ(Wallet wallet, boolean store) {
+        boolean closed = wallet.closeNative(() -> closeNativeJ(wallet, store));
+        if (closed) clearManagedWalletIfCurrent(wallet);
+        return closed;
+    }
 
     public boolean close(Wallet wallet, boolean store) {
+        return wallet.closeNative(() -> closeManagedWallet(wallet, store));
+    }
+
+    private boolean closeManagedWallet(Wallet wallet, boolean store) {
+        boolean unmanaged = unmanageWalletIfCurrent(wallet);
+        if (!unmanaged) {
+            Timber.tag("Monero").e("Could not unmanage wallet");
+        }
+        boolean closed = false;
         try {
-            unmanageWallet(wallet);
-        } catch (Exception ex) {
-            Timber.tag("Monero").e(ex, "Could not unmanage wallet");
+            closed = closeNativeJ(wallet, store);
+            return closed;
+        } finally {
+            if (!closed && unmanaged) restoreManagedWalletIfEmpty(wallet);
         }
-        boolean closed = closeJ(wallet, store);
-        if (!closed) {
-            manageWallet(wallet);
-        }
-        return closed;
     }
 
     public boolean close(Wallet wallet) {

@@ -53,6 +53,43 @@ class WalletNativeLifecycleTest {
     }
 
     @Test
+    fun balanceAccess_directClose_returnsZeroForEveryEntryPoint() {
+        val wallet = createWallet()
+        assertEquals(0L, wallet.getBalance(0))
+        assertEquals(0L, wallet.balanceAll)
+        assertEquals(0L, wallet.getUnlockedBalance(0))
+        assertEquals(0L, wallet.unlockedBalanceAll)
+
+        var closed = false
+        try {
+            closed = walletManager.closeJ(wallet, false)
+            assertTrue(closed)
+            assertNull(walletManager.wallet)
+            assertEquals(0L, wallet.getBalance(0))
+            assertEquals(0L, wallet.balanceAll)
+            assertEquals(0L, wallet.getUnlockedBalance(0))
+            assertEquals(0L, wallet.unlockedBalanceAll)
+        } finally {
+            walletManager.clearManagedWalletIfCurrent(wallet)
+            if (!closed) wallet.close(false)
+        }
+    }
+
+    @Test
+    fun closeNative_actionRuns_disposesPendingTransactionFirst() {
+        val wallet = CountingWallet()
+        var disposeCallsInAction = 0
+
+        assertTrue(wallet.closeNative {
+            disposeCallsInAction = wallet.disposeCalls
+            true
+        })
+
+        assertEquals(1, disposeCallsInAction)
+        assertEquals(1, wallet.disposeCalls)
+    }
+
+    @Test
     fun storeWithKeysSafe_persistsRestoreHeightAcrossNonSavingClose() {
         val wallet = createWallet()
         val restoreHeight = 123_456L
@@ -156,4 +193,12 @@ class WalletNativeLifecycleTest {
 
     private fun createWallet(): Wallet =
         walletManager.createWallet(walletFile, "", "English", 0)
+
+    private class CountingWallet : Wallet(1L) {
+        var disposeCalls = 0
+
+        override fun disposePendingTransaction() {
+            disposeCalls++
+        }
+    }
 }

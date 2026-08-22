@@ -383,7 +383,7 @@ class MoneroWalletService(private val appContext: Context) {
      *
      * [WalletManager.close] re-manages the wallet whenever the native close fails. For a wallet
      * that is no longer the managed one that would evict whichever wallet someone else opened
-     * meanwhile, so such a wallet is closed without touching the managed reference at all.
+     * meanwhile, so such a wallet uses identity-safe [WalletManager.closeJ] instead.
      */
     @WorkerThread
     private fun closeOwnedWallet(wallet: Wallet, saveWallet: Boolean = false): Boolean {
@@ -391,7 +391,6 @@ class MoneroWalletService(private val appContext: Context) {
         val closed = if (wallet === manager.wallet) {
             wallet.close(saveWallet)
         } else {
-            wallet.disposePendingTransaction()
             manager.closeJ(wallet, saveWallet)
         }
         if (closed && wallet === ownedWallet) {

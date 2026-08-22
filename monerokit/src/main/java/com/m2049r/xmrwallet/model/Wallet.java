@@ -30,6 +30,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -113,6 +114,7 @@ public class Wallet {
 
     private long handle = 0;
     private long listenerHandle = 0;
+    private final WalletNativeCallGate nativeCallGate = new WalletNativeCallGate();
 
     Wallet(long handle) {
         this.handle = handle;
@@ -246,12 +248,18 @@ public class Wallet {
     }
 
     public boolean close(boolean store) {
-        disposePendingTransaction();
         return WalletManager.getInstance().close(this, store);
     }
 
     public boolean close() {
         return close(false);
+    }
+
+    boolean closeNative(BooleanSupplier action) {
+        return nativeCallGate.close(() -> {
+            disposePendingTransaction();
+            return action.getAsBoolean();
+        });
     }
 
     public native String getFilename();
@@ -289,17 +297,33 @@ public class Wallet {
         return getBalance(accountIndex);
     }
 
-    public native long getBalance(int accountIndex);
+    public long getBalance(int accountIndex) {
+        return nativeCallGate.read(() -> getBalanceJ(accountIndex));
+    }
 
-    public native long getBalanceAll();
+    private native long getBalanceJ(int accountIndex);
+
+    public long getBalanceAll() {
+        return nativeCallGate.read(this::getBalanceAllJ);
+    }
+
+    private native long getBalanceAllJ();
 
     public long getUnlockedBalance() {
         return getUnlockedBalance(accountIndex);
     }
 
-    public native long getUnlockedBalanceAll();
+    public long getUnlockedBalanceAll() {
+        return nativeCallGate.read(this::getUnlockedBalanceAllJ);
+    }
 
-    public native long getUnlockedBalance(int accountIndex);
+    private native long getUnlockedBalanceAllJ();
+
+    public long getUnlockedBalance(int accountIndex) {
+        return nativeCallGate.read(() -> getUnlockedBalanceJ(accountIndex));
+    }
+
+    private native long getUnlockedBalanceJ(int accountIndex);
 
     public native boolean isWatchOnly();
 
