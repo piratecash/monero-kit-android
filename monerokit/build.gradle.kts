@@ -7,12 +7,11 @@ plugins {
     `maven-publish`
 }
 
-// JitPack injects the requested tag via JITPACK_VERSION/VERSION; the gh-pages workflow injects
-// SHORT_SHA; local builds fall back to the current git short SHA.
+// JitPack injects the requested tag via JITPACK_VERSION/VERSION; local builds fall back to the
+// current git short SHA.
 val resolvedVersion: String = providers.environmentVariable("JITPACK_VERSION")
     .orElse(providers.environmentVariable("VERSION"))
     .orElse(providers.environmentVariable("VERSION_NAME"))
-    .orElse(providers.environmentVariable("SHORT_SHA"))
     .orElse(provider {
         val process = ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
             .directory(rootDir)
@@ -106,12 +105,6 @@ afterEvaluate {
                 groupId = "com.github.piratecash"
                 artifactId = "monero-kit-android"
                 version = resolvedVersion
-            }
-        }
-        repositories {
-            maven {
-                name = "local"
-                url = uri(layout.buildDirectory.dir("maven-repo"))
             }
         }
     }
