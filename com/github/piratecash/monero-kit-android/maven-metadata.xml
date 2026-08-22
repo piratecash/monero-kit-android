@@ -3,11 +3,11 @@
   <groupId>com.github.piratecash</groupId>
   <artifactId>monero-kit-android</artifactId>
   <versioning>
-    <latest>402bc07</latest>
-    <release>402bc07</release>
+    <latest>261aa1e</latest>
+    <release>261aa1e</release>
     <versions>
-      <version>402bc07</version>
+      <version>261aa1e</version>
     </versions>
-    <lastUpdated>20260817042818</lastUpdated>
+    <lastUpdated>20260822094430</lastUpdated>
   </versioning>
 </metadata>
