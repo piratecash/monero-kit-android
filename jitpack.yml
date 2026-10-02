@@ -1,0 +1,65 @@
+jdk:
+  - openjdk21
+
+before_install:
+  # The subshell is required: JitPack runs these lines in its own shell, where a bare `exit`
+  # ends the build green without artifacts and a leaking `set -u` breaks its later commands.
+  - |
+    (
+    set -eu
+    TAG="${JITPACK_VERSION:-${VERSION:-}}"
+    case "$TAG" in
+      v*) ;;
+      *)
+        echo "the desktop natives ship with v* tags only (got '${TAG:-<unset>}')" >&2
+        exit 1
+        ;;
+    esac
+
+    BASE="https://github.com/piratecash/monero-kit-android/releases/download/$TAG"
+    ASSETS="monerokit-desktop-linux-x64.tar.gz monerokit-desktop-macos-arm64.tar.gz monerokit-desktop-windows-x64.tar.gz monerokit-desktop-symbols-linux-x64.tar.gz monerokit-desktop-symbols-macos-arm64.tar.gz monerokit-desktop-symbols-windows-x64.tar.gz SOURCE.sha256"
+
+    mkdir -p natives-download
+    cd natives-download
+
+    fetch() {
+      i=1
+      while ! curl -fsSL -o "$1" "$BASE/$1"; do
+        if [ "$i" -ge 5 ]; then
+          echo "$1 of $TAG could not be downloaded; is the release of $TAG published?" >&2
+          return 1
+        fi
+        echo "retrying $1 of $TAG ($i/5)"
+        sleep 20
+        i=$((i + 1))
+      done
+    }
+
+    fetch natives.sha256
+    for name in $ASSETS; do
+      fetch "$name"
+    done
+
+    # The manifest must name exactly the set this route installs.
+    printf '%s\n' $ASSETS | sort > expected.txt
+    awk '{ sub(/^\*/, "", $2); print $2 }' natives.sha256 | sort > listed.txt
+    diff -u expected.txt listed.txt
+
+    sha256sum --strict -c natives.sha256
+
+    cd ..
+    mkdir -p natives/desktop/prebuilt
+    for target in linux-x64 macos-arm64 windows-x64; do
+      tar -xzf "natives-download/monerokit-desktop-$target.tar.gz" -C natives/desktop/prebuilt
+    done
+    for file in linux-x64/libmonerujo.so macos-arm64/libmonerujo.dylib windows-x64/monerujo.dll \
+        linux-x64/SOURCE.sha256 macos-arm64/SOURCE.sha256 windows-x64/SOURCE.sha256; do
+      if [ ! -s "natives/desktop/prebuilt/$file" ]; then
+        echo "$file is missing or empty after unpacking" >&2
+        exit 1
+      fi
+    done
+    )
+
+install:
+  - export ANDROID_HOME="$HOME/android-sdk" ANDROID_SDK_ROOT="$HOME/android-sdk" ANDROID_NDK_HOME="$HOME/android-sdk/ndk/27.0.12077973" && bash scripts/install-android-sdk.sh && touch local.properties && ./gradlew :monerokit:publishToMavenLocal

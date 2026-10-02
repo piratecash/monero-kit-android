@@ -20,6 +20,7 @@ import static com.m2049r.xmrwallet.model.NetworkType.NetworkType_Mainnet;
 
 import androidx.annotation.Nullable;
 
+import com.google.common.net.HostAndPort;
 import com.m2049r.xmrwallet.data.Node;
 import com.m2049r.xmrwallet.util.RestoreHeight;
 
@@ -29,15 +30,19 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 
-import lombok.Getter;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
 
+@Keep
 public class WalletManager {
+    private static final String TAG = "MoneroKit:Wallet";
+
 
     private final NetworkType networkType = NetworkType_Mainnet;
 
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     // no need to keep a reference to the REAL WalletManager (we get it every tvTime we need it)
@@ -68,30 +73,39 @@ public class WalletManager {
         }
     }
 
-    private Wallet managedWallet = null;
+    private volatile Wallet managedWallet = null;
 
     @Nullable
     public Wallet getWallet() {
         return managedWallet;
     }
 
-    private void manageWallet(Wallet wallet) {
-        Timber.d("Managing %s", wallet.getName());
+    private synchronized void manageWallet(Wallet wallet) {
+        MoneroLog.d(TAG, "Managing %s", wallet.getName());
         managedWallet = wallet;
     }
 
-    private void unmanageWallet(Wallet wallet) {
-        if (wallet == null) {
-            throw new IllegalArgumentException("Cannot unmanage null!");
-        }
-        if (getWallet() == null) {
-            throw new IllegalStateException("No wallet under management!");
-        }
-        if (getWallet() != wallet) {
-            throw new IllegalStateException(wallet.getName() + " not under management!");
-        }
-        Timber.d("Unmanaging %s", managedWallet.getName());
+    private synchronized boolean unmanageWalletIfCurrent(Wallet wallet) {
+        if (managedWallet != wallet) return false;
+        MoneroLog.d(TAG, "Unmanaging %s", wallet.getName());
         managedWallet = null;
+        return true;
+    }
+
+    private synchronized void restoreManagedWalletIfEmpty(Wallet wallet) {
+        if (managedWallet == null) manageWallet(wallet);
+    }
+
+    /**
+     * Clears the managed wallet reference by identity only, without touching the
+     * native wallet (no {@code getName()} or other native call). Used after a
+     * {@code storeSafe()} SIGSEGV, where the wallet's native state is undefined
+     * and must not be dereferenced.
+     */
+    public synchronized void clearManagedWalletIfCurrent(Wallet expected) {
+        if (managedWallet == expected) {
+            managedWallet = null;
+        }
     }
 
     public Wallet createWallet(File aFile, String password, String language, long height) {
@@ -107,10 +121,10 @@ public class WalletManager {
             final long restoreHeight =
                     (height > -1) ? height : RestoreHeight.getInstance().getHeight(restoreDate.getTime());
             wallet.setRestoreHeight(restoreHeight);
-            Timber.d("Changed Restore Height from %d to %d", oldHeight, wallet.getRestoreHeight());
+            MoneroLog.d(TAG, "Changed Restore Height from %d to %d", oldHeight, wallet.getRestoreHeight());
             wallet.setPassword(password); // this rewrites the keys file (which contains the restore height)
         } else
-            Timber.e(wallet.getStatus().toString());
+            MoneroLog.e(TAG, wallet.getStatus().toString());
         return wallet;
     }
 
@@ -168,7 +182,7 @@ public class WalletManager {
     public Wallet createWalletFromDevice(File aFile, String password, long restoreHeight,
                                          Wallet.Device device) {
         final String lookahead = device.getAccountLookahead() + ":" + device.getSubaddressLookahead();
-        Timber.d("Creating from %s with %s lookahead", device, lookahead);
+        MoneroLog.d(TAG, "Creating from %s with %s lookahead", device, lookahead);
         long walletHandle = createWalletFromDeviceJ(aFile.getAbsolutePath(), password,
                 getNetworkType().getValue(), device.name(), restoreHeight,
                 lookahead);
@@ -184,22 +198,34 @@ public class WalletManager {
                                                 String subaddressLookahead);
 
 
-    public native boolean closeJ(Wallet wallet);
+    private native boolean closeNativeJ(Wallet wallet, boolean store);
+
+    public boolean closeJ(Wallet wallet, boolean store) {
+        boolean closed = wallet.closeNative(() -> closeNativeJ(wallet, store));
+        if (closed) clearManagedWalletIfCurrent(wallet);
+        return closed;
+    }
+
+    public boolean close(Wallet wallet, boolean store) {
+        return wallet.closeNative(() -> closeManagedWallet(wallet, store));
+    }
+
+    private boolean closeManagedWallet(Wallet wallet, boolean store) {
+        boolean unmanaged = unmanageWalletIfCurrent(wallet);
+        if (!unmanaged) {
+            MoneroLog.e(TAG, "Could not unmanage wallet");
+        }
+        boolean closed = false;
+        try {
+            closed = closeNativeJ(wallet, store);
+            return closed;
+        } finally {
+            if (!closed && unmanaged) restoreManagedWalletIfEmpty(wallet);
+        }
+    }
 
     public boolean close(Wallet wallet) {
-        try {
-            unmanageWallet(wallet);
-        } catch (Exception ex) {
-            Timber.tag("Monero").e(ex, "Could not unmanage wallet");
-            // we try to close it anyway
-        }
-        boolean closed = closeJ(wallet);
-        if (!closed) {
-            // in case we could not close it
-            // we manage it again
-            manageWallet(wallet);
-        }
-        return closed;
+        return close(wallet, false);
     }
 
     public boolean walletExists(File aFile) {
@@ -224,9 +250,7 @@ public class WalletManager {
     //public native List<String> findWallets(String path); // this does not work - some error in boost
 
     public class WalletInfo implements Comparable<WalletInfo> {
-        @Getter
         final private File path;
-        @Getter
         final private String name;
 
         public WalletInfo(File wallet) {
@@ -238,11 +262,19 @@ public class WalletManager {
         public int compareTo(WalletInfo another) {
             return name.toLowerCase().compareTo(another.name.toLowerCase());
         }
+
+        public File getPath() {
+            return this.path;
+        }
+
+        public String getName() {
+            return this.name;
+        }
     }
 
     public List<WalletInfo> findWallets(File path) {
         List<WalletInfo> wallets = new ArrayList<>();
-        Timber.d("Scanning: %s", path.getAbsolutePath());
+        MoneroLog.d(TAG, "Scanning: %s", path.getAbsolutePath());
         File[] found = path.listFiles(new FilenameFilter() {
             public boolean accept(File dir, String filename) {
                 return filename.endsWith(".keys");
@@ -259,6 +291,7 @@ public class WalletManager {
 //TODO virtual bool checkPayment(const std::string &address, const std::string &txid, const std::string &txkey, const std::string &daemon_address, uint64_t &received, uint64_t &height, std::string &error) const = 0;
 
     private String daemonAddress = null;
+    private String daemonRpcAddress = null;
 
     public NetworkType getNetworkType() {
         return networkType;
@@ -268,6 +301,7 @@ public class WalletManager {
     public void setDaemon(Node node) {
         if (node != null) {
             this.daemonAddress = node.getAddress();
+            this.daemonRpcAddress = HostAndPort.fromParts(node.getHost(), node.getRpcPort()).toString();
             if (networkType != node.getNetworkType())
                 throw new IllegalArgumentException("network type does not match");
             this.daemonUsername = node.getUsername();
@@ -275,6 +309,7 @@ public class WalletManager {
             setDaemonAddressJ(daemonAddress);
         } else {
             this.daemonAddress = null;
+            this.daemonRpcAddress = null;
             this.daemonUsername = "";
             this.daemonPassword = "";
             //setDaemonAddressJ(""); // don't disconnect as monero code blocks for many seconds!
@@ -287,6 +322,13 @@ public class WalletManager {
             throw new IllegalStateException("use setDaemon() to initialise daemon and net first!");
         }
         return this.daemonAddress;
+    }
+
+    public String getDaemonRpcAddress() {
+        if (daemonRpcAddress == null) {
+            throw new IllegalStateException("use setDaemon() to initialise daemon and net first!");
+        }
+        return this.daemonRpcAddress;
     }
 
     private native void setDaemonAddressJ(String address);

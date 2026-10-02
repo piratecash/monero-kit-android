@@ -21,34 +21,47 @@ import androidx.annotation.Nullable;
 
 import com.m2049r.xmrwallet.data.Subaddress;
 import com.m2049r.xmrwallet.data.TxData;
+import com.piratecash.monero.signer.ColdKeyImageSyncResult;
+import com.piratecash.monero.signer.HardwareKeyImageRefreshResult;
+import com.piratecash.monero.signer.HardwareWalletErrorCode;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.Value;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
+import com.piratecash.monero.MoneroNative;
+import com.piratecash.monero.net.MoneroProxy;
+import androidx.annotation.Keep;
 
+@Keep
 public class Wallet {
+    private static final String TAG = "MoneroKit:Wallet";
+
     final static public long SWEEP_ALL = Long.MAX_VALUE;
 
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
+    @Keep
     static public class Status {
         Status(int status, String errorString) {
+            this(status, errorString, 0);
+        }
+
+        Status(int status, String errorString, int hardwareWalletErrorCode) {
             this.status = StatusEnum.values()[status];
             this.errorString = errorString;
+            this.hardwareWalletErrorCode = hardwareWalletErrorCode;
         }
 
         final private StatusEnum status;
         final private String errorString;
+        final private int hardwareWalletErrorCode;
         @Nullable
         private ConnectionStatus connectionStatus; // optional
 
@@ -58,6 +71,11 @@ public class Wallet {
 
         public String getErrorString() {
             return errorString;
+        }
+
+        @Nullable
+        public HardwareWalletErrorCode getHardwareWalletError() {
+            return HardwareWalletErrorCode.fromCodeOrNull(hardwareWalletErrorCode);
         }
 
         public void setConnectionStatus(@Nullable ConnectionStatus connectionStatus) {
@@ -76,7 +94,8 @@ public class Wallet {
         @Override
         @NonNull
         public String toString() {
-            return "Wallet.Status: " + status + "/" + errorString + "/" + connectionStatus;
+            return "Wallet.Status: " + status + "/" + errorString + "/" +
+                    connectionStatus + "/" + getHardwareWalletError();
         }
     }
 
@@ -87,7 +106,7 @@ public class Wallet {
     }
 
     public void setAccountIndex(int accountIndex) {
-        Timber.d("setAccountIndex(%d)", accountIndex);
+        MoneroLog.d(TAG, "setAccountIndex(%d)", accountIndex);
         this.accountIndex = accountIndex;
         getHistory().setAccountFor(this);
     }
@@ -98,6 +117,7 @@ public class Wallet {
 
     private long handle = 0;
     private long listenerHandle = 0;
+    private final WalletNativeCallGate nativeCallGate = new WalletNativeCallGate();
 
     Wallet(long handle) {
         this.handle = handle;
@@ -108,8 +128,6 @@ public class Wallet {
         this.accountIndex = accountIndex;
     }
 
-    @RequiredArgsConstructor
-    @Getter
     public enum Device {
         Undefined(0, 0),
         Software(50, 200),
@@ -118,6 +136,19 @@ public class Wallet {
         Sidekick(5, 20);
         private final int accountLookahead;
         private final int subaddressLookahead;
+
+        private Device(int accountLookahead, int subaddressLookahead) {
+            this.accountLookahead = accountLookahead;
+            this.subaddressLookahead = subaddressLookahead;
+        }
+
+        public int getAccountLookahead() {
+            return this.accountLookahead;
+        }
+
+        public int getSubaddressLookahead() {
+            return this.subaddressLookahead;
+        }
     }
 
     public enum StatusEnum {
@@ -166,6 +197,15 @@ public class Wallet {
 
     private native String getAddressJ(int accountIndex, int addressIndex);
 
+    public void deviceShowAddress(int accountIndex, int addressIndex, String paymentId) {
+        if (accountIndex < 0 || addressIndex < 0) {
+            throw new IllegalArgumentException("Account and address indices must be non-negative");
+        }
+        deviceShowAddressJ(accountIndex, addressIndex, paymentId);
+    }
+
+    private native void deviceShowAddressJ(int accountIndex, int addressIndex, String paymentId);
+
     public Subaddress getSubaddressObject(int accountIndex, int subAddressIndex) {
         return new Subaddress(accountIndex, subAddressIndex, getSubaddress(subAddressIndex), getSubaddressLabel(subAddressIndex));
     }
@@ -205,19 +245,49 @@ public class Wallet {
 
     public native synchronized boolean store(String path);
 
+    private native int storeSafeJ();
+
+    public int storeSafe() {
+        return storeSafeJ();
+    }
+
+    private native int storeWithKeysSafeJ();
+
+    /**
+     * Persists the encrypted keys file before the cache.  The status values are
+     * identical to {@link #storeSafe()}; only zero commits the operation.
+     */
+    public int storeWithKeysSafe() {
+        return storeWithKeysSafeJ();
+    }
+
+    public boolean close(boolean store) {
+        return WalletManager.getInstance().close(this, store);
+    }
+
     public boolean close() {
-        disposePendingTransaction();
-        return WalletManager.getInstance().close(this);
+        return close(false);
+    }
+
+    boolean closeNative(BooleanSupplier action) {
+        return nativeCallGate.close(() -> {
+            disposePendingTransaction();
+            return action.getAsBoolean();
+        });
     }
 
     public native String getFilename();
 
     //    virtual std::string keysFilename() const = 0;
     public boolean init(long upper_transaction_size_limit) {
-        return initJ(WalletManager.getInstance().getDaemonAddress(), upper_transaction_size_limit, WalletManager.getInstance().getDaemonUsername(), WalletManager.getInstance().getDaemonPassword());
+        WalletManager walletManager = WalletManager.getInstance();
+        String proxy = MoneroProxy.current();
+        // Manager daemon RPCs (blockchainHeight etc.) must take the same route as wallet2.
+        walletManager.setProxy(proxy);
+        return initJ(walletManager.getDaemonAddress(), upper_transaction_size_limit, walletManager.getDaemonUsername(), walletManager.getDaemonPassword(), proxy);
     }
 
-    private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password);
+    private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password, String proxy);
 
 //    virtual bool createWatchOnly(const std::string &path, const std::string &password, const std::string &language) const = 0;
 //    virtual void setRefreshFromBlockHeight(uint64_t refresh_from_block_height) = 0;
@@ -245,17 +315,33 @@ public class Wallet {
         return getBalance(accountIndex);
     }
 
-    public native long getBalance(int accountIndex);
+    public long getBalance(int accountIndex) {
+        return nativeCallGate.read(() -> getBalanceJ(accountIndex));
+    }
 
-    public native long getBalanceAll();
+    private native long getBalanceJ(int accountIndex);
+
+    public long getBalanceAll() {
+        return nativeCallGate.read(this::getBalanceAllJ);
+    }
+
+    private native long getBalanceAllJ();
 
     public long getUnlockedBalance() {
         return getUnlockedBalance(accountIndex);
     }
 
-    public native long getUnlockedBalanceAll();
+    public long getUnlockedBalanceAll() {
+        return nativeCallGate.read(this::getUnlockedBalanceAllJ);
+    }
 
-    public native long getUnlockedBalance(int accountIndex);
+    private native long getUnlockedBalanceAllJ();
+
+    public long getUnlockedBalance(int accountIndex) {
+        return nativeCallGate.read(() -> getUnlockedBalanceJ(accountIndex));
+    }
+
+    private native long getUnlockedBalanceJ(int accountIndex);
 
     public native boolean isWatchOnly();
 
@@ -301,6 +387,8 @@ public class Wallet {
 
     public native void pauseRefresh();
 
+    public native boolean pauseRefreshAndDrain();
+
     public native boolean refresh();
 
     public native void refreshAsync();
@@ -311,6 +399,34 @@ public class Wallet {
         synced = false;
         rescanBlockchainAsyncJ();
     }
+
+    private native void rescanBlockchainAsyncPreserveKeyImagesJ();
+
+    public void rescanBlockchainAsyncPreserveKeyImages() {
+        synced = false;
+        rescanBlockchainAsyncPreserveKeyImagesJ();
+    }
+
+    public native boolean hasUnknownKeyImages();
+
+    public ColdKeyImageSyncResult coldKeyImageSync() {
+        long[] result = coldKeyImageSyncJ();
+        if (result == null || result.length != 4) {
+            throw new IllegalStateException("Invalid cold key image sync result");
+        }
+        return new ColdKeyImageSyncResult(result[0], result[1], result[2], result[3] != 0);
+    }
+
+    private native long[] coldKeyImageSyncJ();
+
+    public HardwareKeyImageRefreshResult refreshWithHardwareKeyImages(
+            HardwareKeyImageRefreshResult.Request request) {
+        if (request == null) throw new IllegalArgumentException("Refresh request is required");
+        long[] result = refreshWithHardwareKeyImagesJ(request.getMode().getNativeValue(), request.getRestoreHeight());
+        return HardwareKeyImageRefreshResult.fromNative(result);
+    }
+
+    private native long[] refreshWithHardwareKeyImagesJ(int mode, long restoreHeight);
 
 //TODO virtual void setAutoRefreshInterval(int millis) = 0;
 //TODO virtual int autoRefreshInterval() const = 0;
@@ -335,7 +451,7 @@ public class Wallet {
         disposePendingTransaction();
         int _priority = txData.getPriority().getValue();
         final boolean sweepAll = txData.getAmount() == SWEEP_ALL;
-        Timber.d("TxData: %s", txData);
+        MoneroLog.d(TAG, "TxData: %s", txData);
         long txHandle = (sweepAll ? createSweepTransaction(txData.getDestination(), "", txData.getMixin(), _priority, accountIndex) :
                 createTransactionMultDest(txData.getDestinations(), "", txData.getAmounts(), txData.getMixin(), _priority, accountIndex, txData.getSubaddresses()));
         pendingTransaction = new PendingTransaction(txHandle);
@@ -357,8 +473,15 @@ public class Wallet {
 
     private native long createSweepUnmixableTransactionJ();
 
-//virtual UnsignedTransaction * loadUnsignedTx(const std::string &unsigned_filename) = 0;
-//virtual bool submitTransaction(const std::string &fileName) = 0;
+    public UnsignedTransaction loadUnsignedTx(String unsignedFileName) {
+        long unsignedTxHandle = loadUnsignedTxJ(unsignedFileName);
+        if (unsignedTxHandle == 0) return null;
+        return new UnsignedTransaction(unsignedTxHandle);
+    }
+
+    private native long loadUnsignedTxJ(String unsignedFileName);
+
+    public native boolean submitTransaction(String fileName);
 
     public native void disposeTransaction(PendingTransaction pendingTransaction);
 
@@ -489,7 +612,7 @@ public class Wallet {
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss", Locale.US).format(new Date());
         addSubaddress(accountIndex, timeStamp);
         String subaddress = getLastSubaddress(accountIndex);
-        Timber.d("%d: %s", getNumSubaddresses(accountIndex) - 1, subaddress);
+        MoneroLog.d(TAG, "%d: %s", getNumSubaddresses(accountIndex) - 1, subaddress);
         return subaddress;
     }
 
@@ -506,14 +629,11 @@ public class Wallet {
 
     private native int getDeviceTypeJ();
 
-    @Getter
-    @Setter
     PocketChangeSetting pocketChangeSetting = PocketChangeSetting.of(false, 0);
 
-    @Value(staticConstructor = "of")
-    static public class PocketChangeSetting {
-        boolean enabled;
-        long amount;
+    static public final class PocketChangeSetting {
+        private final boolean enabled;
+        private final long amount;
 
         public String toPrefString() {
             return Long.toString((enabled ? 1 : -1) * amount);
@@ -523,5 +643,55 @@ public class Wallet {
             long value = Long.parseLong(prefString);
             return of(value > 0, Math.abs(value));
         }
+
+        private PocketChangeSetting(boolean enabled, long amount) {
+            this.enabled = enabled;
+            this.amount = amount;
+        }
+
+        public static Wallet.PocketChangeSetting of(boolean enabled, long amount) {
+            return new Wallet.PocketChangeSetting(enabled, amount);
+        }
+
+        public boolean isEnabled() {
+            return this.enabled;
+        }
+
+        public long getAmount() {
+            return this.amount;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == this) return true;
+            if (!(o instanceof Wallet.PocketChangeSetting)) return false;
+            Wallet.PocketChangeSetting other = (Wallet.PocketChangeSetting) o;
+            if (this.isEnabled() != other.isEnabled()) return false;
+            if (this.getAmount() != other.getAmount()) return false;
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int PRIME = 59;
+            int result = 1;
+            result = result * PRIME + (this.isEnabled() ? 79 : 97);
+            long $amount = this.getAmount();
+            result = result * PRIME + (int) ($amount >>> 32 ^ $amount);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "Wallet.PocketChangeSetting(enabled=" + this.isEnabled() + ", amount=" + this.getAmount() + ")";
+        }
+    }
+
+    public PocketChangeSetting getPocketChangeSetting() {
+        return this.pocketChangeSetting;
+    }
+
+    public void setPocketChangeSetting(PocketChangeSetting pocketChangeSetting) {
+        this.pocketChangeSetting = pocketChangeSetting;
     }
 }

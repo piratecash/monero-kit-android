@@ -16,10 +16,10 @@
 
 package com.m2049r.xmrwallet.model;
 
-import android.os.Parcel;
-import android.os.Parcelable;
+import androidx.annotation.Keep;
 
-public class Transfer implements Parcelable {
+@Keep
+public class Transfer {
     public long amount;
     public String address;
 
@@ -27,31 +27,4 @@ public class Transfer implements Parcelable {
         this.amount = amount;
         this.address = address;
     }
-
-    @Override
-    public void writeToParcel(Parcel out, int flags) {
-        out.writeLong(amount);
-        out.writeString(address);
-    }
-
-    public static final Creator<Transfer> CREATOR = new Creator<Transfer>() {
-        public Transfer createFromParcel(Parcel in) {
-            return new Transfer(in);
-        }
-
-        public Transfer[] newArray(int size) {
-            return new Transfer[size];
-        }
-    };
-
-    private Transfer(Parcel in) {
-        amount = in.readLong();
-        address = in.readString();
-    }
-
-    @Override
-    public int describeContents() {
-        return 0;
-    }
-
 }

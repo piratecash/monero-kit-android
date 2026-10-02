@@ -16,22 +16,18 @@
 
 package com.m2049r.xmrwallet.model;
 
-import android.os.Parcel;
-import android.os.Parcelable;
-
 import com.m2049r.xmrwallet.data.Subaddress;
 
 import java.util.List;
+import androidx.annotation.Keep;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 
 // this is not the TransactionInfo from the API as that is owned by the TransactionHistory
 // this is a POJO for the TransactionInfoAdapter
-public class TransactionInfo implements Parcelable, Comparable<TransactionInfo> {
+@Keep
+public class TransactionInfo implements Comparable<TransactionInfo> {
     public static final int CONFIRMATION = 10; // blocks
 
-    @RequiredArgsConstructor
     public enum Direction {
         Direction_In(0),
         Direction_Out(1);
@@ -46,8 +42,15 @@ public class TransactionInfo implements Parcelable, Comparable<TransactionInfo> 
             return null;
         }
 
-        @Getter
         private final int value;
+
+        private Direction(int value) {
+            this.value = value;
+        }
+
+        public int getValue() {
+            return this.value;
+        }
     }
 
     public Direction direction;
@@ -104,7 +107,6 @@ public class TransactionInfo implements Parcelable, Comparable<TransactionInfo> 
         calcNetAmount();
     }
 
-    @Getter
     private long netAmount;
 
     public long getPocketChangeAmount() {
@@ -136,66 +138,6 @@ public class TransactionInfo implements Parcelable, Comparable<TransactionInfo> 
     }
 
     @Override
-    public void writeToParcel(Parcel out, int flags) {
-        out.writeInt(direction.getValue());
-        out.writeByte((byte) (isPending ? 1 : 0));
-        out.writeByte((byte) (isFailed ? 1 : 0));
-        out.writeLong(amount);
-        out.writeLong(fee);
-        out.writeLong(blockheight);
-        out.writeString(hash);
-        out.writeLong(timestamp);
-        out.writeString(paymentId);
-        out.writeInt(accountIndex);
-        out.writeInt(addressIndex);
-        out.writeLong(confirmations);
-        out.writeLong(unlockTime);
-        out.writeString(subaddressLabel);
-        out.writeList(transfers);
-        out.writeString(txKey);
-        out.writeString(notes);
-        out.writeString(address);
-        out.writeLong(netAmount);
-    }
-
-    public static final Creator<TransactionInfo> CREATOR = new Creator<TransactionInfo>() {
-        public TransactionInfo createFromParcel(Parcel in) {
-            return new TransactionInfo(in);
-        }
-
-        public TransactionInfo[] newArray(int size) {
-            return new TransactionInfo[size];
-        }
-    };
-
-    private TransactionInfo(Parcel in) {
-        direction = Direction.fromInteger(in.readInt());
-        isPending = in.readByte() != 0;
-        isFailed = in.readByte() != 0;
-        amount = in.readLong();
-        fee = in.readLong();
-        blockheight = in.readLong();
-        hash = in.readString();
-        timestamp = in.readLong();
-        paymentId = in.readString();
-        accountIndex = in.readInt();
-        addressIndex = in.readInt();
-        confirmations = in.readLong();
-        unlockTime = in.readLong();
-        subaddressLabel = in.readString();
-        transfers = in.readArrayList(Transfer.class.getClassLoader());
-        txKey = in.readString();
-        notes = in.readString();
-        address = in.readString();
-        netAmount = in.readLong();
-    }
-
-    @Override
-    public int describeContents() {
-        return 0;
-    }
-
-    @Override
     public int compareTo(TransactionInfo another) {
         long b1 = this.timestamp;
         long b2 = another.timestamp;
@@ -206,5 +148,9 @@ public class TransactionInfo implements Parcelable, Comparable<TransactionInfo> 
         } else {
             return this.hash.compareTo(another.hash);
         }
+    }
+
+    public long getNetAmount() {
+        return this.netAmount;
     }
 }
