@@ -16,6 +16,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
+import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -26,7 +31,7 @@ object MoneroHttpClient {
     private const val HTTP_TIMEOUT_READ = 5000L
     private const val HTTP_TIMEOUT_WRITE = 2500L
 
-    /** Clearnet unless Android's Orbot helper swapped in its Tor client; clearnet follows the system SOCKS proxy. */
+    /** Clearnet unless Android's Orbot helper swapped in its Tor client; clearnet takes wallet2's route ([MoneroProxy]). */
     @JvmStatic
     @Volatile
     var client: OkHttpClient = newClearnetClient()
@@ -41,7 +46,21 @@ object MoneroHttpClient {
         .connectTimeout(HTTP_TIMEOUT_CONNECT, TimeUnit.MILLISECONDS)
         .writeTimeout(HTTP_TIMEOUT_WRITE, TimeUnit.MILLISECONDS)
         .readTimeout(HTTP_TIMEOUT_READ, TimeUnit.MILLISECONDS)
+        .proxySelector(WalletProxySelector)
         .build()
+
+    /** wallet2's SOCKS proxy when set: the JVM default prefers `http.proxyHost`, which a Tor tunnel port rejects. */
+    private object WalletProxySelector : ProxySelector() {
+        override fun select(uri: URI): List<Proxy> {
+            val proxy = MoneroProxy.current()
+            if (proxy.isEmpty()) return getDefault().select(uri)
+            val address = InetSocketAddress(proxy.substringBeforeLast(':'), proxy.substringAfterLast(':').toInt())
+            return listOf(Proxy(Proxy.Type.SOCKS, address))
+        }
+
+        override fun connectFailed(uri: URI, address: SocketAddress, error: IOException) =
+            getDefault().connectFailed(uri, address, error)
+    }
 
     /** A GET without [data], a JSON POST with it; digest auth when [username] is set. */
     class Request @JvmOverloads constructor(
