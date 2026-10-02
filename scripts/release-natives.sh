@@ -159,6 +159,7 @@ if [[ $state == absent ]]; then
     gh release create "$TAG" --draft --verify-tag --title "$TAG" \
         --notes "Desktop natives for linux-x64, macos-arm64 and windows-x64, with their debug symbols."
 fi
-(cd "$OUT" && gh release upload "$TAG" --clobber "${ASSETS[@]}")
+# Stay in the checkout: gh resolves the repository from the working directory's git remote.
+gh release upload "$TAG" --clobber "${ASSETS[@]/#/$OUT/}"
 diff -u <(local_digests) <(remote_digests) || fail "the draft of $TAG does not carry exactly the local assets"
 echo "draft $TAG is ready: run natives-smoke.yml for it, then: gh release edit $TAG --draft=false"
