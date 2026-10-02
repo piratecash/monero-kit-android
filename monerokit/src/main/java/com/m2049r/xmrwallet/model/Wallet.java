@@ -280,7 +280,11 @@ public class Wallet {
 
     //    virtual std::string keysFilename() const = 0;
     public boolean init(long upper_transaction_size_limit) {
-        return initJ(WalletManager.getInstance().getDaemonAddress(), upper_transaction_size_limit, WalletManager.getInstance().getDaemonUsername(), WalletManager.getInstance().getDaemonPassword(), MoneroProxy.current());
+        WalletManager walletManager = WalletManager.getInstance();
+        String proxy = MoneroProxy.current();
+        // Manager daemon RPCs (blockchainHeight etc.) must take the same route as wallet2.
+        walletManager.setProxy(proxy);
+        return initJ(walletManager.getDaemonAddress(), upper_transaction_size_limit, walletManager.getDaemonUsername(), walletManager.getDaemonPassword(), proxy);
     }
 
     private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password, String proxy);
