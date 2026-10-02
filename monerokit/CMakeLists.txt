@@ -2,18 +2,30 @@ cmake_minimum_required(VERSION 3.4.1)
 project(monerujo)
 message(STATUS ABI_INFO  = ${ANDROID_ABI})
 set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+if(ANDROID)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+else()
+    set(CMAKE_CXX_STANDARD 11)
+endif()
 add_library( monerujo
              SHARED
              src/main/cpp/monerujo.cpp )
 
 set(EXTERNAL_LIBS_DIR ${CMAKE_SOURCE_DIR}/external-libs)
 set(TREZOR_LIBS_DIR ${EXTERNAL_LIBS_DIR}/trezor)
-set(ARCHIVE_LIBS_DIR ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI})
-set(TREZOR_ARCHIVE_LIBS_DIR ${TREZOR_LIBS_DIR}/${ANDROID_ABI})
 set(EXTERNAL_INCLUDE_DIR ${TREZOR_LIBS_DIR}/include)
-set(MONERO_ARCHIVE_LIBS_DIR ${ARCHIVE_LIBS_DIR}/monero)
-set(TREZOR_MONERO_ARCHIVE_LIBS_DIR ${TREZOR_ARCHIVE_LIBS_DIR}/monero)
+if(ANDROID)
+    set(ARCHIVE_LIBS_DIR ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI})
+    set(TREZOR_ARCHIVE_LIBS_DIR ${TREZOR_LIBS_DIR}/${ANDROID_ABI})
+    set(MONERO_ARCHIVE_LIBS_DIR ${ARCHIVE_LIBS_DIR}/monero)
+    set(TREZOR_MONERO_ARCHIVE_LIBS_DIR ${TREZOR_ARCHIVE_LIBS_DIR}/monero)
+else()
+    # natives/desktop/build.sh collects one desktop build of monero and its depends here
+    set(ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(TREZOR_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(MONERO_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(TREZOR_MONERO_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+endif()
 
 ############
 # libsodium
@@ -201,20 +213,17 @@ set_target_properties(cryptonote_format_utils_basic PROPERTIES IMPORTED_LOCATION
 # System
 #############
 
-find_library( log-lib log )
-
 include_directories( ${EXTERNAL_INCLUDE_DIR} )
 
 message(STATUS EXTERNAL_LIBS_DIR :  ${EXTERNAL_LIBS_DIR})
 
-if(${ANDROID_ABI} STREQUAL "x86_64")
+if(EXISTS ${MONERO_ARCHIVE_LIBS_DIR}/libwallet-crypto.a)
     set(EXTRA_LIBS "wallet-crypto")
 else()
     set(EXTRA_LIBS "")
 endif()
 
-target_link_libraries(  monerujo
-
+set(MONERUJO_LIBS
                         wallet_api
                         wallet
                         cryptonote_core
@@ -257,6 +266,32 @@ target_link_libraries(  monerujo
                         crypto
 
                         sodium
-
-                       ${log-lib}
                        )
+
+if(ANDROID)
+    find_library( log-lib log )
+    target_link_libraries(monerujo ${MONERUJO_LIBS} ${log-lib})
+else()
+    if(WIN32)
+        set(JNI_PLATFORM win32)
+    elseif(APPLE)
+        set(JNI_PLATFORM darwin)
+    else()
+        set(JNI_PLATFORM linux)
+    endif()
+    include_directories(${JNI_HEADER_DIR} ${JNI_HEADER_DIR}/${JNI_PLATFORM})
+    if(WIN32)
+        set_target_properties(monerujo PROPERTIES PREFIX "")
+        # Wallet::init imbues a boost::locale on Windows only; depends builds it on ICU.
+        target_link_directories(monerujo PRIVATE ${MONERO_DESKTOP_LIBS})
+        target_link_libraries(monerujo -Wl,--start-group ${MONERUJO_LIBS}
+                boost_locale icuio icui18n icuuc icudata icutu iconv -Wl,--end-group
+                -static -lssp ws2_32 crypt32 iphlpapi)
+    elseif(APPLE)
+        # IOKit: the miner's battery-power check (cryptonote_basic/miner.cpp)
+        target_link_libraries(monerujo ${MONERUJO_LIBS} "-framework IOKit")
+    else()
+        target_link_libraries(monerujo -Wl,--start-group ${MONERUJO_LIBS} -Wl,--end-group
+                -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,noexecstack pthread dl)
+    endif()
+endif()

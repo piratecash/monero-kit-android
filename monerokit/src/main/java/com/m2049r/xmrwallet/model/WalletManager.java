@@ -30,15 +30,19 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 
-import lombok.Getter;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
 
+@Keep
 public class WalletManager {
+    private static final String TAG = "MoneroKit:Wallet";
+
 
     private final NetworkType networkType = NetworkType_Mainnet;
 
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     // no need to keep a reference to the REAL WalletManager (we get it every tvTime we need it)
@@ -77,13 +81,13 @@ public class WalletManager {
     }
 
     private synchronized void manageWallet(Wallet wallet) {
-        Timber.d("Managing %s", wallet.getName());
+        MoneroLog.d(TAG, "Managing %s", wallet.getName());
         managedWallet = wallet;
     }
 
     private synchronized boolean unmanageWalletIfCurrent(Wallet wallet) {
         if (managedWallet != wallet) return false;
-        Timber.d("Unmanaging %s", wallet.getName());
+        MoneroLog.d(TAG, "Unmanaging %s", wallet.getName());
         managedWallet = null;
         return true;
     }
@@ -117,10 +121,10 @@ public class WalletManager {
             final long restoreHeight =
                     (height > -1) ? height : RestoreHeight.getInstance().getHeight(restoreDate.getTime());
             wallet.setRestoreHeight(restoreHeight);
-            Timber.d("Changed Restore Height from %d to %d", oldHeight, wallet.getRestoreHeight());
+            MoneroLog.d(TAG, "Changed Restore Height from %d to %d", oldHeight, wallet.getRestoreHeight());
             wallet.setPassword(password); // this rewrites the keys file (which contains the restore height)
         } else
-            Timber.e(wallet.getStatus().toString());
+            MoneroLog.e(TAG, wallet.getStatus().toString());
         return wallet;
     }
 
@@ -178,7 +182,7 @@ public class WalletManager {
     public Wallet createWalletFromDevice(File aFile, String password, long restoreHeight,
                                          Wallet.Device device) {
         final String lookahead = device.getAccountLookahead() + ":" + device.getSubaddressLookahead();
-        Timber.d("Creating from %s with %s lookahead", device, lookahead);
+        MoneroLog.d(TAG, "Creating from %s with %s lookahead", device, lookahead);
         long walletHandle = createWalletFromDeviceJ(aFile.getAbsolutePath(), password,
                 getNetworkType().getValue(), device.name(), restoreHeight,
                 lookahead);
@@ -209,7 +213,7 @@ public class WalletManager {
     private boolean closeManagedWallet(Wallet wallet, boolean store) {
         boolean unmanaged = unmanageWalletIfCurrent(wallet);
         if (!unmanaged) {
-            Timber.tag("Monero").e("Could not unmanage wallet");
+            MoneroLog.e(TAG, "Could not unmanage wallet");
         }
         boolean closed = false;
         try {
@@ -246,9 +250,7 @@ public class WalletManager {
     //public native List<String> findWallets(String path); // this does not work - some error in boost
 
     public class WalletInfo implements Comparable<WalletInfo> {
-        @Getter
         final private File path;
-        @Getter
         final private String name;
 
         public WalletInfo(File wallet) {
@@ -260,11 +262,19 @@ public class WalletManager {
         public int compareTo(WalletInfo another) {
             return name.toLowerCase().compareTo(another.name.toLowerCase());
         }
+
+        public File getPath() {
+            return this.path;
+        }
+
+        public String getName() {
+            return this.name;
+        }
     }
 
     public List<WalletInfo> findWallets(File path) {
         List<WalletInfo> wallets = new ArrayList<>();
-        Timber.d("Scanning: %s", path.getAbsolutePath());
+        MoneroLog.d(TAG, "Scanning: %s", path.getAbsolutePath());
         File[] found = path.listFiles(new FilenameFilter() {
             public boolean accept(File dir, String filename) {
                 return filename.endsWith(".keys");

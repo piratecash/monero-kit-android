@@ -16,12 +16,13 @@
 
 package com.m2049r.xmrwallet.model;
 
-import lombok.Getter;
-import lombok.Setter;
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
 
+@Keep
 public class PendingTransaction {
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     public long handle;
@@ -101,11 +102,17 @@ public class PendingTransaction {
 
     public native long getTxCount();
 
-    @Getter
-    @Setter
     private long pocketChange;
 
     public long getNetAmount() {
         return getAmount() - pocketChange;
+    }
+
+    public long getPocketChange() {
+        return this.pocketChange;
+    }
+
+    public void setPocketChange(long pocketChange) {
+        this.pocketChange = pocketChange;
     }
 }

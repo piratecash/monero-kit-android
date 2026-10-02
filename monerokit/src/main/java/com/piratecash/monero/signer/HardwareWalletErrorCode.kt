@@ -1,5 +1,8 @@
 package com.piratecash.monero.signer
 
+import androidx.annotation.Keep
+
+@Keep
 enum class HardwareWalletErrorCode(val code: Int) {
     UnsupportedModel(1),
     DeviceNotFound(2),

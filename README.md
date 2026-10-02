@@ -56,12 +56,22 @@
 ## Dependencies
 
 - [Monerujo](https://github.com/m2049r/xmrwallet) (via the `monerokit` module)
-- Jetpack Compose, Material3, Timber, NetCipher, OkHttp, Guava, and more (see build.gradle.kts)
+- NetCipher (Android), OkHttp, Guava, and more (see build.gradle.kts); the samples use Compose Multiplatform
 
 ## Project Structure
 
-- `app/` — demo Compose application
+- `sample-shared/` — Compose Multiplatform sample UI and wallet controller (Android + desktop)
+- `sample-android/` — Android host of the sample
+- `sample-desktop/` — desktop host of the sample
 - `monerokit/` — Monero library (JNI, Java/Kotlin wrappers)
+
+## Samples
+
+The wallet seed is read at build time from `local.properties` (`words`, `restore_height`, optional `node`)
+and baked into a generated source under `sample-shared/build/`; it is never committed.
+
+- Android: `./gradlew :sample-android:installDebug`
+- Desktop: `./gradlew :sample-desktop:run` (wallet files in `~/.monero-kit-sample/wallets`; needs the desktop natives)
 
 ## Author
 

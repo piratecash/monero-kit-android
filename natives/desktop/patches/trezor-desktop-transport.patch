@@ -1,0 +1,12 @@
+--- a/src/device_trezor/CMakeLists.txt
++++ b/src/device_trezor/CMakeLists.txt
+@@ -62,9 +62,6 @@
+ 
+ option(TREZOR_ANDROID_TRANSPORT "Use the application-owned Android packet transport" OFF)
+ if(TREZOR_ANDROID_TRANSPORT)
+-    if(NOT ANDROID)
+-        message(FATAL_ERROR "TREZOR_ANDROID_TRANSPORT requires an Android build")
+-    endif()
+     if(USE_DEVICE_TREZOR_LIBUSB)
+         message(FATAL_ERROR "TREZOR_ANDROID_TRANSPORT cannot be combined with libusb")
+     endif()

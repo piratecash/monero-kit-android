@@ -16,43 +16,28 @@
 
 package com.m2049r.xmrwallet.data;
 
-import android.os.Parcel;
-import android.os.Parcelable;
-
 import com.m2049r.xmrwallet.model.CoinsInfo;
 import com.m2049r.xmrwallet.model.PendingTransaction;
 import com.m2049r.xmrwallet.model.Wallet;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
 
-// https://stackoverflow.com/questions/2139134/how-to-send-an-object-from-one-android-activity-to-another-using-intents
-@ToString
-public class TxData implements Parcelable {
-    @Getter
+public class TxData {
+    private static final String TAG = "MoneroKit:Wallet";
+
     private String[] destinations = new String[1];
-    @Getter
     private long[] amounts = new long[1];
-    @Getter
-    @Setter
     private int mixin;
-    @Getter
-    @Setter
     private PendingTransaction.Priority priority;
-    @Getter
     private int[] subaddresses;
 
-    @Getter
-    @Setter
     private UserNotes userNotes;
 
     public TxData() {
@@ -97,41 +82,6 @@ public class TxData implements Parcelable {
         }
     }
 
-    @Override
-    public void writeToParcel(Parcel out, int flags) {
-        out.writeInt(destinations.length);
-        out.writeStringArray(destinations);
-        out.writeLongArray(amounts);
-        out.writeInt(mixin);
-        out.writeInt(priority.getValue());
-    }
-
-    // this is used to regenerate your object. All Parcelables must have a CREATOR that implements these two methods
-    public static final Creator<TxData> CREATOR = new Creator<TxData>() {
-        public TxData createFromParcel(Parcel in) {
-            return new TxData(in);
-        }
-
-        public TxData[] newArray(int size) {
-            return new TxData[size];
-        }
-    };
-
-    protected TxData(Parcel in) {
-        int len = in.readInt();
-        destinations = new String[len];
-        in.readStringArray(destinations);
-        amounts = new long[len];
-        in.readLongArray(amounts);
-        mixin = in.readInt();
-        priority = PendingTransaction.Priority.fromInteger(in.readInt());
-    }
-
-    @Override
-    public int describeContents() {
-        return 0;
-    }
-
     //////////////////////////
     /// PocketChange Stuff ///
     //////////////////////////
@@ -141,7 +91,6 @@ public class TxData implements Parcelable {
     final static public int POCKETCHANGE_SLOTS_MAX = 14; // max number of pocketchange slots
     final static public int POCKETCHANGE_IDX_MAX = POCKETCHANGE_IDX + POCKETCHANGE_SLOTS_MAX - 1;
 
-    @Data
     static private class PocketChangeSlot {
         private long amount;
         private long spendableAmount;
@@ -149,6 +98,56 @@ public class TxData implements Parcelable {
         public void add(CoinsInfo coin) {
             amount += coin.getAmount();
             if (coin.isSpendable()) spendableAmount += coin.getAmount();
+        }
+
+        public PocketChangeSlot() {
+        }
+
+        public long getAmount() {
+            return this.amount;
+        }
+
+        public long getSpendableAmount() {
+            return this.spendableAmount;
+        }
+
+        public void setAmount(long amount) {
+            this.amount = amount;
+        }
+
+        public void setSpendableAmount(long spendableAmount) {
+            this.spendableAmount = spendableAmount;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == this) return true;
+            if (!(o instanceof TxData.PocketChangeSlot)) return false;
+            TxData.PocketChangeSlot other = (TxData.PocketChangeSlot) o;
+            if (!other.canEqual((Object) this)) return false;
+            if (this.getAmount() != other.getAmount()) return false;
+            if (this.getSpendableAmount() != other.getSpendableAmount()) return false;
+            return true;
+        }
+
+        protected boolean canEqual(Object other) {
+            return other instanceof TxData.PocketChangeSlot;
+        }
+
+        @Override
+        public int hashCode() {
+            int PRIME = 59;
+            int result = 1;
+            long $amount = this.getAmount();
+            result = result * PRIME + (int) ($amount >>> 32 ^ $amount);
+            long $spendableAmount = this.getSpendableAmount();
+            result = result * PRIME + (int) ($spendableAmount >>> 32 ^ $spendableAmount);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "TxData.PocketChangeSlot(amount=" + this.getAmount() + ", spendableAmount=" + this.getSpendableAmount() + ")";
         }
     }
 
@@ -194,7 +193,7 @@ public class TxData implements Parcelable {
         final long pocketChangeAmount = setting.getAmount();
         if (spendableAmount < pocketChangeAmount)
             return; // do conventional transaction
-        Timber.d("usableSubaddressIdx=%d", usableSubaddressIdx);
+        MoneroLog.d(TAG, "usableSubaddressIdx=%d", usableSubaddressIdx);
         if (usableSubaddressIdx >= 0) {
             spendableSubaddressIdx.add(usableSubaddressIdx);
             spendableAmount += slots[usableSubaddressIdx - POCKETCHANGE_IDX].getAmount();
@@ -215,7 +214,7 @@ public class TxData implements Parcelable {
                     slotsToFill.add(i);
                     slotToFillAmounts.add(topupAmount);
                     spendableAmount -= topupAmount;
-                    Timber.d("FILL %d with %d", i, topupAmount);
+                    MoneroLog.d(TAG, "FILL %d with %d", i, topupAmount);
                 }
             }
         }
@@ -246,5 +245,46 @@ public class TxData implements Parcelable {
         for (int subaddressIdx : spendableSubaddressIdx) {
             subaddresses[i++] = subaddressIdx;
         }
+    }
+
+    @Override
+    public String toString() {
+        return "TxData(destinations=" + Arrays.deepToString(this.getDestinations()) + ", amounts=" + Arrays.toString(this.getAmounts()) + ", mixin=" + this.getMixin() + ", priority=" + this.getPriority() + ", subaddresses=" + Arrays.toString(this.getSubaddresses()) + ", userNotes=" + this.getUserNotes() + ")";
+    }
+
+    public String[] getDestinations() {
+        return this.destinations;
+    }
+
+    public long[] getAmounts() {
+        return this.amounts;
+    }
+
+    public int getMixin() {
+        return this.mixin;
+    }
+
+    public void setMixin(int mixin) {
+        this.mixin = mixin;
+    }
+
+    public PendingTransaction.Priority getPriority() {
+        return this.priority;
+    }
+
+    public void setPriority(PendingTransaction.Priority priority) {
+        this.priority = priority;
+    }
+
+    public int[] getSubaddresses() {
+        return this.subaddresses;
+    }
+
+    public UserNotes getUserNotes() {
+        return this.userNotes;
+    }
+
+    public void setUserNotes(UserNotes userNotes) {
+        this.userNotes = userNotes;
     }
 }

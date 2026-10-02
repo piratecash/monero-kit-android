@@ -1,6 +1,6 @@
 package com.m2049r.xmrwallet.service
 
-import com.m2049r.levin.util.NetCipherHelper
+import com.piratecash.monero.net.MoneroHttpClient
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -21,15 +21,15 @@ class DaemonTransactionCheckerTest {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        // Route NetCipherHelper.Request through a plain client pointed at the mock server,
+        // Route MoneroHttpClient.Request through a plain client pointed at the mock server,
         // instead of the real Tor/clearnet singleton (never initialized in a JVM unit test).
-        NetCipherHelper.Request.mockClient = OkHttpClient()
+        MoneroHttpClient.Request.mockClient = OkHttpClient()
     }
 
     @After
     fun tearDown() {
         server.shutdown()
-        NetCipherHelper.Request.mockClient = null
+        MoneroHttpClient.Request.mockClient = null
     }
 
     private fun daemonAddress() = "127.0.0.1:${server.port}"

@@ -1,5 +1,7 @@
 package com.piratecash.monero.signer
 
+import androidx.annotation.Keep
+
 enum class ExternalSignerError(val hardwareErrorCode: HardwareWalletErrorCode) {
     NO_CHANNEL(HardwareWalletErrorCode.DeviceNotFound),
     STALE_CHANNEL(HardwareWalletErrorCode.StaleLease),
@@ -22,6 +24,7 @@ enum class ExternalSignerError(val hardwareErrorCode: HardwareWalletErrorCode) {
     }
 }
 
+@Keep
 class ExternalSignerException(
     val hardwareErrorCode: HardwareWalletErrorCode,
     message: String,

@@ -18,26 +18,11 @@ package com.m2049r.xmrwallet.data;
 
 import java.util.regex.Pattern;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
-
-@RequiredArgsConstructor
-@ToString
-@EqualsAndHashCode
 public class Subaddress implements Comparable<Subaddress> {
-    @Getter
     final private int accountIndex;
-    @Getter
     final private int addressIndex;
-    @Getter
     final private String address;
-    @Getter
     private final String label;
-    @Getter
-    @Setter
     private long amount;
 
     @Override
@@ -59,5 +44,78 @@ public class Subaddress implements Comparable<Subaddress> {
             return ("#" + addressIndex);
         else
             return label;
+    }
+
+    public Subaddress(int accountIndex, int addressIndex, String address, String label) {
+        this.accountIndex = accountIndex;
+        this.addressIndex = addressIndex;
+        this.address = address;
+        this.label = label;
+    }
+
+    @Override
+    public String toString() {
+        return "Subaddress(accountIndex=" + this.getAccountIndex() + ", addressIndex=" + this.getAddressIndex() + ", address=" + this.getAddress() + ", label=" + this.getLabel() + ", amount=" + this.getAmount() + ")";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == this) return true;
+        if (!(o instanceof Subaddress)) return false;
+        Subaddress other = (Subaddress) o;
+        if (!other.canEqual((Object) this)) return false;
+        if (this.getAccountIndex() != other.getAccountIndex()) return false;
+        if (this.getAddressIndex() != other.getAddressIndex()) return false;
+        if (this.getAmount() != other.getAmount()) return false;
+        Object this$address = this.getAddress();
+        Object other$address = other.getAddress();
+        if (this$address == null ? other$address != null : !this$address.equals(other$address)) return false;
+        Object this$label = this.getLabel();
+        Object other$label = other.getLabel();
+        if (this$label == null ? other$label != null : !this$label.equals(other$label)) return false;
+        return true;
+    }
+
+    protected boolean canEqual(Object other) {
+        return other instanceof Subaddress;
+    }
+
+    @Override
+    public int hashCode() {
+        int PRIME = 59;
+        int result = 1;
+        result = result * PRIME + this.getAccountIndex();
+        result = result * PRIME + this.getAddressIndex();
+        long $amount = this.getAmount();
+        result = result * PRIME + (int) ($amount >>> 32 ^ $amount);
+        Object $address = this.getAddress();
+        result = result * PRIME + ($address == null ? 43 : $address.hashCode());
+        Object $label = this.getLabel();
+        result = result * PRIME + ($label == null ? 43 : $label.hashCode());
+        return result;
+    }
+
+    public int getAccountIndex() {
+        return this.accountIndex;
+    }
+
+    public int getAddressIndex() {
+        return this.addressIndex;
+    }
+
+    public String getAddress() {
+        return this.address;
+    }
+
+    public String getLabel() {
+        return this.label;
+    }
+
+    public long getAmount() {
+        return this.amount;
+    }
+
+    public void setAmount(long amount) {
+        this.amount = amount;
     }
 }

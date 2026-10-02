@@ -5,7 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.Node
 import com.m2049r.xmrwallet.service.MoneroWalletService
-import com.m2049r.xmrwallet.util.Helper
+import com.piratecash.monero.MoneroWalletFiles
 import com.piratecash.monero.signer.HardwareKeyImageRefreshResult
 import org.junit.After
 import org.junit.Assert.assertNull
@@ -46,7 +46,7 @@ class WalletNativeLifecycleTest {
     @Test
     fun stop_managedWalletWithoutListener_closesWallet() {
         createWallet()
-        val service = MoneroWalletService(ApplicationProvider.getApplicationContext())
+        val service = MoneroWalletService(MoneroWalletFiles.root(ApplicationProvider.getApplicationContext()))
 
         assertTrue(service.stop(false))
         assertNull(walletManager.wallet)
@@ -144,12 +144,12 @@ class WalletNativeLifecycleTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         NetCipherHelper.createInstance(context)
         val name = "paused-start-${System.nanoTime()}"
-        val path = Helper.getWalletFile(context, name)
+        val path = MoneroWalletFiles.file(context, name)
         val created = walletManager.createWallet(path, "", "English", 0)
         assertTrue(created.close(true))
         walletManager.setDaemon(requireNotNull(Node.fromString("127.0.0.1:1")))
         try {
-            val service = MoneroWalletService(context)
+            val service = MoneroWalletService(MoneroWalletFiles.root(context))
             val status = requireNotNull(service.startPaused(name, ""))
 
             assertTrue("controlled startup must return its non-OK init status", !status.isOk)
@@ -168,7 +168,7 @@ class WalletNativeLifecycleTest {
     fun startPaused_openFailureReturnsOriginalStatusUntilTheCallerPerformsOneNonSavingAbort() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val name = "paused-open-${System.nanoTime()}"
-        val path = Helper.getWalletFile(context, name)
+        val path = MoneroWalletFiles.file(context, name)
         val created = walletManager.createWallet(path, "correct-password", "English", 0)
         assertTrue(created.close(true))
         val expectedStatus = walletManager.openWallet(path.absolutePath, "wrong-password").status
@@ -176,7 +176,7 @@ class WalletNativeLifecycleTest {
         assertTrue(walletManager.wallet?.close(false) == true)
 
         try {
-            val service = MoneroWalletService(context)
+            val service = MoneroWalletService(MoneroWalletFiles.root(context))
             val actualStatus = requireNotNull(service.startPaused(name, "wrong-password"))
 
             assertEquals(expectedStatus.status, actualStatus.status)

@@ -42,9 +42,11 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
 
 public class Monero {
+    private static final String TAG = "MoneroKit:Mnemonic";
+
 
     static public String convert(String mnemonic, String passphrase) {
         String[] words = mnemonic.toLowerCase().split("\\s");
@@ -229,7 +231,7 @@ public class Monero {
             makeKeys();
             return getWords();
         } catch (NoSuchAlgorithmException | InvalidKeySpecException | InvalidKeyException ex) {
-            Timber.e(ex);
+            MoneroLog.e(TAG, "Deriving keys failed", ex);
         }
         return null;
     }

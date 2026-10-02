@@ -6,7 +6,7 @@ import kotlinx.coroutines.CancellationException
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
-import timber.log.Timber
+import com.piratecash.monero.log.MoneroLog
 
 /**
  * Best-effort check of which transactions are already known to the currently configured
@@ -21,6 +21,8 @@ import timber.log.Timber
  * Note: this reveals interest in those txids to the queried daemon.
  */
 object DaemonTransactionChecker {
+    private const val TAG = "MoneroKit:Daemon"
+
     private const val GET_TRANSACTIONS_PATH = "get_transactions"
 
     suspend fun knownTransactions(txIds: List<String>): Set<String> {
@@ -53,7 +55,7 @@ object DaemonTransactionChecker {
     } catch (ex: CancellationException) {
         throw ex
     } catch (ex: Exception) {
-        Timber.d(ex, "knownTransactions check failed")
+        MoneroLog.d(TAG, "knownTransactions check failed", ex)
         emptySet()
     }
 

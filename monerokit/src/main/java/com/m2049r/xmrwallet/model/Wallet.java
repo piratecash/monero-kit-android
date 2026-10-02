@@ -32,19 +32,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.Value;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
+import com.piratecash.monero.MoneroNative;
+import com.piratecash.monero.net.MoneroProxy;
+import androidx.annotation.Keep;
 
+@Keep
 public class Wallet {
+    private static final String TAG = "MoneroKit:Wallet";
+
     final static public long SWEEP_ALL = Long.MAX_VALUE;
 
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
+    @Keep
     static public class Status {
         Status(int status, String errorString) {
             this(status, errorString, 0);
@@ -103,7 +106,7 @@ public class Wallet {
     }
 
     public void setAccountIndex(int accountIndex) {
-        Timber.d("setAccountIndex(%d)", accountIndex);
+        MoneroLog.d(TAG, "setAccountIndex(%d)", accountIndex);
         this.accountIndex = accountIndex;
         getHistory().setAccountFor(this);
     }
@@ -125,8 +128,6 @@ public class Wallet {
         this.accountIndex = accountIndex;
     }
 
-    @RequiredArgsConstructor
-    @Getter
     public enum Device {
         Undefined(0, 0),
         Software(50, 200),
@@ -135,6 +136,19 @@ public class Wallet {
         Sidekick(5, 20);
         private final int accountLookahead;
         private final int subaddressLookahead;
+
+        private Device(int accountLookahead, int subaddressLookahead) {
+            this.accountLookahead = accountLookahead;
+            this.subaddressLookahead = subaddressLookahead;
+        }
+
+        public int getAccountLookahead() {
+            return this.accountLookahead;
+        }
+
+        public int getSubaddressLookahead() {
+            return this.subaddressLookahead;
+        }
     }
 
     public enum StatusEnum {
@@ -266,10 +280,10 @@ public class Wallet {
 
     //    virtual std::string keysFilename() const = 0;
     public boolean init(long upper_transaction_size_limit) {
-        return initJ(WalletManager.getInstance().getDaemonAddress(), upper_transaction_size_limit, WalletManager.getInstance().getDaemonUsername(), WalletManager.getInstance().getDaemonPassword());
+        return initJ(WalletManager.getInstance().getDaemonAddress(), upper_transaction_size_limit, WalletManager.getInstance().getDaemonUsername(), WalletManager.getInstance().getDaemonPassword(), MoneroProxy.current());
     }
 
-    private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password);
+    private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password, String proxy);
 
 //    virtual bool createWatchOnly(const std::string &path, const std::string &password, const std::string &language) const = 0;
 //    virtual void setRefreshFromBlockHeight(uint64_t refresh_from_block_height) = 0;
@@ -433,7 +447,7 @@ public class Wallet {
         disposePendingTransaction();
         int _priority = txData.getPriority().getValue();
         final boolean sweepAll = txData.getAmount() == SWEEP_ALL;
-        Timber.d("TxData: %s", txData);
+        MoneroLog.d(TAG, "TxData: %s", txData);
         long txHandle = (sweepAll ? createSweepTransaction(txData.getDestination(), "", txData.getMixin(), _priority, accountIndex) :
                 createTransactionMultDest(txData.getDestinations(), "", txData.getAmounts(), txData.getMixin(), _priority, accountIndex, txData.getSubaddresses()));
         pendingTransaction = new PendingTransaction(txHandle);
@@ -594,7 +608,7 @@ public class Wallet {
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss", Locale.US).format(new Date());
         addSubaddress(accountIndex, timeStamp);
         String subaddress = getLastSubaddress(accountIndex);
-        Timber.d("%d: %s", getNumSubaddresses(accountIndex) - 1, subaddress);
+        MoneroLog.d(TAG, "%d: %s", getNumSubaddresses(accountIndex) - 1, subaddress);
         return subaddress;
     }
 
@@ -611,14 +625,11 @@ public class Wallet {
 
     private native int getDeviceTypeJ();
 
-    @Getter
-    @Setter
     PocketChangeSetting pocketChangeSetting = PocketChangeSetting.of(false, 0);
 
-    @Value(staticConstructor = "of")
-    static public class PocketChangeSetting {
-        boolean enabled;
-        long amount;
+    static public final class PocketChangeSetting {
+        private final boolean enabled;
+        private final long amount;
 
         public String toPrefString() {
             return Long.toString((enabled ? 1 : -1) * amount);
@@ -628,5 +639,55 @@ public class Wallet {
             long value = Long.parseLong(prefString);
             return of(value > 0, Math.abs(value));
         }
+
+        private PocketChangeSetting(boolean enabled, long amount) {
+            this.enabled = enabled;
+            this.amount = amount;
+        }
+
+        public static Wallet.PocketChangeSetting of(boolean enabled, long amount) {
+            return new Wallet.PocketChangeSetting(enabled, amount);
+        }
+
+        public boolean isEnabled() {
+            return this.enabled;
+        }
+
+        public long getAmount() {
+            return this.amount;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == this) return true;
+            if (!(o instanceof Wallet.PocketChangeSetting)) return false;
+            Wallet.PocketChangeSetting other = (Wallet.PocketChangeSetting) o;
+            if (this.isEnabled() != other.isEnabled()) return false;
+            if (this.getAmount() != other.getAmount()) return false;
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int PRIME = 59;
+            int result = 1;
+            result = result * PRIME + (this.isEnabled() ? 79 : 97);
+            long $amount = this.getAmount();
+            result = result * PRIME + (int) ($amount >>> 32 ^ $amount);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "Wallet.PocketChangeSetting(enabled=" + this.isEnabled() + ", amount=" + this.getAmount() + ")";
+        }
+    }
+
+    public PocketChangeSetting getPocketChangeSetting() {
+        return this.pocketChangeSetting;
+    }
+
+    public void setPocketChangeSetting(PocketChangeSetting pocketChangeSetting) {
+        this.pocketChangeSetting = pocketChangeSetting;
     }
 }

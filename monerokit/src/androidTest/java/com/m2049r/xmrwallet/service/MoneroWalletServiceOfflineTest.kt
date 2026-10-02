@@ -8,7 +8,7 @@ import com.m2049r.xmrwallet.data.DefaultNodes
 import com.m2049r.xmrwallet.data.Node
 import com.m2049r.xmrwallet.model.Wallet
 import com.m2049r.xmrwallet.model.WalletManager
-import com.m2049r.xmrwallet.util.Helper
+import com.piratecash.monero.MoneroWalletFiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -26,13 +26,13 @@ class MoneroWalletServiceOfflineTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val walletManager = WalletManager.getInstance()
     private val walletName = "offline-open-${System.nanoTime()}"
-    private val walletFile = Helper.getWalletFile(context, walletName)
+    private val walletFile = MoneroWalletFiles.file(context, walletName)
 
     @Test
     fun startOffline_daemonNotSet_opensWalletAndKeepsStoredDataReadable() {
         createWallet()
         walletManager.setDaemon(null)
-        val service = MoneroWalletService(context)
+        val service = MoneroWalletService(MoneroWalletFiles.root(context))
 
         try {
             // With no daemon set every daemon call throws, so reaching Opened proves none was made.
@@ -52,7 +52,7 @@ class MoneroWalletServiceOfflineTest {
         NetCipherHelper.createInstance(context)
         createWallet()
         walletManager.setDaemon(null)
-        val service = MoneroWalletService(context)
+        val service = MoneroWalletService(MoneroWalletFiles.root(context))
 
         try {
             assertEquals(LocalOpenResult.Opened, service.startOffline(walletName, ""))
@@ -77,7 +77,7 @@ class MoneroWalletServiceOfflineTest {
         NetCipherHelper.createInstance(context)
         createWallet()
         walletManager.setDaemon(null)
-        val service = MoneroWalletService(context)
+        val service = MoneroWalletService(MoneroWalletFiles.root(context))
         val refreshed = CountDownLatch(1)
 
         try {
@@ -105,8 +105,8 @@ class MoneroWalletServiceOfflineTest {
     fun connectDaemon_globalWalletReplacedByAnother_reportsNoWallet() {
         createWallet()
         walletManager.setDaemon(null)
-        val service = MoneroWalletService(context)
-        val otherFile = Helper.getWalletFile(context, "$walletName-other")
+        val service = MoneroWalletService(MoneroWalletFiles.root(context))
+        val otherFile = MoneroWalletFiles.file(context, "$walletName-other")
 
         try {
             assertEquals(LocalOpenResult.Opened, service.startOffline(walletName, ""))
@@ -126,8 +126,8 @@ class MoneroWalletServiceOfflineTest {
     fun stop_globalWalletReplacedByAnother_closesOwnedWalletOnly() {
         createWallet()
         walletManager.setDaemon(null)
-        val service = MoneroWalletService(context)
-        val otherFile = Helper.getWalletFile(context, "$walletName-other")
+        val service = MoneroWalletService(MoneroWalletFiles.root(context))
+        val otherFile = MoneroWalletFiles.file(context, "$walletName-other")
         var other: Wallet? = null
 
         try {
@@ -150,7 +150,7 @@ class MoneroWalletServiceOfflineTest {
         walletManager.wallet?.close(false)
         assertNull(walletManager.wallet)
 
-        assertEquals(DaemonConnectResult.NoWallet, MoneroWalletService(context).connectDaemon())
+        assertEquals(DaemonConnectResult.NoWallet, MoneroWalletService(MoneroWalletFiles.root(context)).connectDaemon())
     }
 
     private fun createWallet() {

@@ -15,10 +15,8 @@
  */
 package com.m2049r.xmrwallet.service
 
-import android.content.Context
 import androidx.annotation.VisibleForTesting
 import androidx.annotation.WorkerThread
-import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.TxData
 import com.m2049r.xmrwallet.model.PendingTransaction
 import com.m2049r.xmrwallet.model.Wallet
@@ -31,7 +29,10 @@ import com.m2049r.xmrwallet.offline.SignedMoneroTransaction
 import com.m2049r.xmrwallet.offline.SignedMoneroTransactionEnvelope
 import com.m2049r.xmrwallet.offline.SignedRawMoneroTransaction
 import com.m2049r.xmrwallet.util.Helper
-import timber.log.Timber
+import com.piratecash.monero.log.MoneroLog
+import java.io.File
+
+private const val TAG = "MoneroKit:Service"
 
 /** Outcome of opening a wallet from local storage; carries no daemon state. */
 sealed interface LocalOpenResult {
@@ -46,7 +47,7 @@ sealed interface DaemonConnectResult {
     data class Failed(val status: Wallet.Status?) : DaemonConnectResult
 }
 
-class MoneroWalletService(private val appContext: Context) {
+class MoneroWalletService(private val walletRoot: File) {
     private var listener: MyWalletListener? = null
 
     /** The wallet this service opened, independent of whichever wallet is process-global. */
@@ -72,7 +73,7 @@ class MoneroWalletService(private val appContext: Context) {
             get() = boundWallet.takeIf { it === ownedWallet }
 
         fun start() {
-            Timber.d("MyWalletListener.start()")
+            MoneroLog.d(TAG, "MyWalletListener.start()")
             boundWallet.setListener(this)
             boundWallet.startRefresh()
         }
@@ -82,7 +83,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         fun stop() {
-            Timber.d("MyWalletListener.stop()")
+            MoneroLog.d(TAG, "MyWalletListener.stop()")
             liveWallet?.pauseRefresh()
             // Don't clear the listener here — the native refresh thread may still be
             // inside fast_refresh() and could callback into a null listener.
@@ -91,7 +92,7 @@ class MoneroWalletService(private val appContext: Context) {
         }
 
         fun resume() {
-            Timber.d("MyWalletListener.resume()")
+            MoneroLog.d(TAG, "MyWalletListener.resume()")
             // Only restart refresh — the listener is already attached from start().
             // Do NOT call wallet.setListener(this) here to avoid native listener
             // churn (each setListenerJ leaks the old native listener by design).
@@ -101,17 +102,17 @@ class MoneroWalletService(private val appContext: Context) {
         // WalletListener callbacks
         override fun moneySpent(txId: String?, amount: Long) {
             if (isStopping || isPaused) return
-            Timber.d("moneySpent() %d @ %s", amount, txId)
+            MoneroLog.d(TAG, "moneySpent() %d @ %s", amount, txId)
         }
 
         override fun moneyReceived(txId: String?, amount: Long) {
             if (isStopping || isPaused) return
-            Timber.d("moneyReceived() %d @ %s", amount, txId)
+            MoneroLog.d(TAG, "moneyReceived() %d @ %s", amount, txId)
         }
 
         override fun unconfirmedMoneyReceived(txId: String?, amount: Long) {
             if (isStopping || isPaused) return
-            Timber.d("unconfirmedMoneyReceived() %d @ %s", amount, txId)
+            MoneroLog.d(TAG, "unconfirmedMoneyReceived() %d @ %s", amount, txId)
         }
 
         private var lastBlockTime: Long = 0
@@ -127,7 +128,7 @@ class MoneroWalletService(private val appContext: Context) {
             // don't flood with an update for every block ...
             if (lastBlockTime < System.currentTimeMillis() - 2000) {
                 lastBlockTime = System.currentTimeMillis()
-                Timber.d("newBlock() @ %d with observer %s", height, observer)
+                MoneroLog.d(TAG, "newBlock() @ %d with observer %s", height, observer)
                 if (observer != null) {
                     var fullRefresh = false
                     updateDaemonState(wallet, if (wallet.isSynchronized) height else 0)
@@ -149,14 +150,14 @@ class MoneroWalletService(private val appContext: Context) {
 
         override fun updated() {
             if (isStopping || isPaused) return
-            Timber.d("updated()")
+            MoneroLog.d(TAG, "updated()")
             if (liveWallet == null) return
             updated = true
         }
 
         override fun refreshed() { // this means it's synced
             if (isStopping || isPaused) return
-            Timber.d("refreshed()")
+            MoneroLog.d(TAG, "refreshed()")
             val wallet = liveWallet ?: return
             if (shouldMarkWalletSynchronizedAfterRefresh(wallet.getStatus().status)) {
                 wallet.setSynchronized()
@@ -203,7 +204,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun setObserver(anObserver: Observer?) {
         observer = anObserver
-        Timber.d("setObserver %s", observer)
+        MoneroLog.d(TAG, "setObserver %s", observer)
     }
 
     interface Observer {
@@ -253,11 +254,11 @@ class MoneroWalletService(private val appContext: Context) {
         isPaused = false
         failedWalletStatus = null
         running = true
-        Timber.d("start()")
+        MoneroLog.d(TAG, "start()")
 
         showProgress(10)
         if (listener == null) {
-            Timber.d("start() loadWallet")
+            MoneroLog.d(TAG, "start() loadWallet")
             val aWallet = loadWallet(
                 walletName,
                 walletPassword,
@@ -278,7 +279,7 @@ class MoneroWalletService(private val appContext: Context) {
         showProgress(101)
         // if we try to refresh the history here we get occasional segfaults!
         // doesnt matter since we update as soon as we get a new block anyway
-        Timber.d("start() done")
+        MoneroLog.d(TAG, "start() done")
 
         val walletStatus = ownedWallet?.getFullStatus()
 
@@ -354,8 +355,8 @@ class MoneroWalletService(private val appContext: Context) {
 
     /**
      * Attaches the daemon to a wallet opened by [startOffline]; on failure it stays open and paused.
-     * Requires a daemon set through `WalletManager.setDaemon()` and an initialized [NetCipherHelper]
-     * — the proxy is mandatory, so a missing one throws instead of connecting in the clear.
+     * Requires a daemon set through `WalletManager.setDaemon()` and, on Android, an initialized
+     * `NetCipherHelper` — the proxy is mandatory, so a missing one throws instead of connecting in the clear.
      */
     @WorkerThread
     fun connectDaemon(): DaemonConnectResult {
@@ -405,7 +406,7 @@ class MoneroWalletService(private val appContext: Context) {
     @WorkerThread
     fun stop(saveWallet: Boolean = true): Boolean {
         isStopping = true
-        Timber.d("stop()")
+        MoneroLog.d(TAG, "stop()")
 
         controlledRefreshGate.stop()
         setObserver(null) // in case it was not reset already
@@ -415,11 +416,11 @@ class MoneroWalletService(private val appContext: Context) {
         // callers rely on to free a wallet somebody else opened before opening the next one.
         val myWallet = ownedWallet ?: WalletManager.getInstance().wallet
         val closed = if (myWallet != null) {
-            Timber.d("stop() closing")
+            MoneroLog.d(TAG, "stop() closing")
             // JNI closeJ stores separately (with SIGSEGV protection), then
             // closes without store — which joins the refresh thread via stop()/deinit().
             val result = closeOwnedWallet(myWallet, saveWallet)
-            Timber.d("stop() closed=%b", result)
+            MoneroLog.d(TAG, "stop() closed=%b", result)
             result
         } else {
             true
@@ -452,7 +453,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     @WorkerThread
     fun pause() {
-        Timber.d("pause()")
+        MoneroLog.d(TAG, "pause()")
         isPaused = true
         controlledRefreshGate.cancel()
         setObserver(null)
@@ -469,24 +470,24 @@ class MoneroWalletService(private val appContext: Context) {
 
     @WorkerThread
     fun resume(anObserver: Observer): Boolean {
-        Timber.d("resume()")
+        MoneroLog.d(TAG, "resume()")
         if (!canRefresh()) return false
         isPaused = false
         setObserver(anObserver)
         listener?.resume()
-        Timber.d("resume() done")
+        MoneroLog.d(TAG, "resume() done")
         return true
     }
 
     /** A wallet opened by [startOffline] has no daemon yet — refreshing it is native UB. */
     private fun canRefresh(): Boolean = when {
         listener == null -> {
-            Timber.d("resume() wallet not open")
+            MoneroLog.d(TAG, "resume() wallet not open")
             false
         }
 
         !daemonInitialized -> {
-            Timber.d("resume() daemon not initialized — connectDaemon() first")
+            MoneroLog.d(TAG, "resume() daemon not initialized — connectDaemon() first")
             false
         }
 
@@ -506,7 +507,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun sweep() {
         val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
-        Timber.d("SWEEP TX for wallet: %s", myWallet.name)
+        MoneroLog.d(TAG, "SWEEP TX for wallet: %s", myWallet.name)
         myWallet.disposePendingTransaction()
 
         val pendingTransaction = myWallet.createSweepUnmixableTransaction()
@@ -519,7 +520,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun prepareTransaction(txData: TxData) {
         val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
-        Timber.d("CREATE TX for wallet: %s", myWallet.name)
+        MoneroLog.d(TAG, "CREATE TX for wallet: %s", myWallet.name)
         myWallet.createCheckedTransaction(txData) { error ->
             IllegalStateException("Create transaction failed: $error")
         }
@@ -527,7 +528,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun createSignedRawTransaction(txData: TxData): SignedRawMoneroTransaction {
         val myWallet = wallet ?: throw MoneroRawTransactionError.WalletNotInitialized()
-        Timber.d("CREATE SIGNED RAW TX for wallet: %s", myWallet.name)
+        MoneroLog.d(TAG, "CREATE SIGNED RAW TX for wallet: %s", myWallet.name)
 
         return try {
             val pendingTransaction = myWallet.createCheckedTransaction(txData) { error ->
@@ -586,7 +587,7 @@ class MoneroWalletService(private val appContext: Context) {
 
     fun sendTransaction(notes: String?): String {
         val myWallet = wallet ?: throw IllegalStateException("Wallet not initialized")
-        Timber.d("SEND TX for wallet: %s", myWallet.name)
+        MoneroLog.d(TAG, "SEND TX for wallet: %s", myWallet.name)
         val pendingTransaction = requireNotNull(myWallet.pendingTransaction) {
             "PendingTransaction is null"
         }
@@ -613,9 +614,9 @@ class MoneroWalletService(private val appContext: Context) {
             myWallet.setUserNote(txid, notes)
         }
         val rc = myWallet.store()
-        Timber.d("wallet stored: %s with rc=%b", myWallet.getName(), rc)
+        MoneroLog.d(TAG, "wallet stored: %s with rc=%b", myWallet.getName(), rc)
         if (!rc) {
-            Timber.w("Wallet store failed: %s", myWallet.status.errorString)
+            MoneroLog.w(TAG, "Wallet store failed: %s", myWallet.status.errorString)
         }
         listener?.updated = true
         return txid
@@ -629,10 +630,10 @@ class MoneroWalletService(private val appContext: Context) {
     ): Wallet? {
         val wallet = openWallet(walletName, walletPassword, closeOnOpenFailure)
         if (wallet != null) {
-            Timber.d("Using daemon %s", WalletManager.getInstance().getDaemonAddress())
+            MoneroLog.d(TAG, "Using daemon %s", WalletManager.getInstance().getDaemonAddress())
             showProgress(55)
             if (initDaemon(wallet) != null) {
-                Timber.e("wallet.init failed")
+                MoneroLog.e(TAG, "wallet.init failed")
                 if (closeOnInitFailure) {
                     closeOwnedWallet(wallet)
                 }
@@ -653,7 +654,6 @@ class MoneroWalletService(private val appContext: Context) {
             failedWalletStatus = status
             return status
         }
-        wallet.setProxy(NetCipherHelper.getProxy())
         daemonInitialized = true
         return null
     }
@@ -663,27 +663,27 @@ class MoneroWalletService(private val appContext: Context) {
         walletPassword: String?,
         closeOnFailure: Boolean,
     ): Wallet? {
-        val path = Helper.getWalletFile(appContext, walletName).absolutePath
+        val path = File(walletRoot, requireNotNull(walletName)).absolutePath
         showProgress(20)
         var wallet: Wallet? = null
         val walletMgr = WalletManager.getInstance()
-        Timber.d("WalletManager network=%s", walletMgr.getNetworkType().name)
+        MoneroLog.d(TAG, "WalletManager network=%s", walletMgr.getNetworkType().name)
         showProgress(30)
         if (walletMgr.walletExists(path)) {
-            Timber.d("open wallet %s", path)
+            MoneroLog.d(TAG, "open wallet %s", path)
             val device =
                 WalletManager.getInstance().queryWalletDevice(path + ".keys", walletPassword)
-            Timber.d("device is %s", device.toString())
+            MoneroLog.d(TAG, "device is %s", device.toString())
             observer?.onWalletOpen(device)
             wallet = walletMgr.openWallet(path, walletPassword)
             // Ownership starts here, not at attachListener(): a wallet retained after a failed
             // open or init is still ours to close.
             ownedWallet = wallet
             showProgress(60)
-            Timber.d("wallet opened")
+            MoneroLog.d(TAG, "wallet opened")
             val walletStatus = wallet.getStatus()
             if (!walletStatus.isOk()) {
-                Timber.d("wallet status is %s", walletStatus)
+                MoneroLog.d(TAG, "wallet status is %s", walletStatus)
                 failedWalletStatus = walletStatus
                 if (closeOnFailure) {
                     closeOwnedWallet(wallet)

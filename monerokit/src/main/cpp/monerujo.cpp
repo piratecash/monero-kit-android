@@ -17,14 +17,18 @@
 #include <inttypes.h>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
-#include <signal.h>
-#include <setjmp.h>
-#include <unistd.h>
+#include <thread>
 #include "monerujo.h"
 #include "wallet2_api.h"
+
+#ifdef __ANDROID__
+#include <signal.h>
+#include <setjmp.h>
 
 // ---------------------------------------------------------------------------
 // Signal-safe wallet close
@@ -116,18 +120,49 @@ static int guarded_store(Monero::Wallet *wallet, bool with_keys = false) {
     }
 }
 
+// Same contract as guarded_store: 0 = closed; 1 = closeWallet() returned false; 2 = SIGSEGV.
+static int guarded_close(Monero::Wallet *wallet) {
+    if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
+        g_in_safe_close = 1;
+        bool ok = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, false);
+        g_in_safe_close = 0;
+        return ok ? 0 : 1;
+    } else {
+        g_in_safe_close = 0;
+        return 2;
+    }
+}
+#else
+// The desktop JVM owns SIGSEGV, so there is no fault guard; WalletImpl::store()
+// itself holds RefreshInhibitor against a concurrent refresh.
+static int guarded_store(Monero::Wallet *wallet, bool with_keys = false) {
+    bool ok = with_keys ? wallet->storeWithKeys() : wallet->store("");
+    return ok ? 0 : 1;
+}
+
+static int guarded_close(Monero::Wallet *wallet) {
+    return Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, false) ? 0 : 1;
+}
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-#include <android/log.h>
 #define LOG_TAG "WalletNDK"
-#define LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, LOG_TAG,__VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG  , LOG_TAG,__VA_ARGS__)
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO   , LOG_TAG,__VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN   , LOG_TAG,__VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR  , LOG_TAG,__VA_ARGS__)
+#ifdef __ANDROID__
+#include <android/log.h>
+#define WALLET_LOG(priority, ...) __android_log_print(ANDROID_LOG_##priority, LOG_TAG, __VA_ARGS__)
+#else
+#define WALLET_LOG(priority, format, ...) \
+    fprintf(stderr, #priority " " LOG_TAG ": " format "\n", ##__VA_ARGS__)
+#endif
+#define LOGV(...) WALLET_LOG(VERBOSE, __VA_ARGS__)
+#define LOGD(...) WALLET_LOG(DEBUG, __VA_ARGS__)
+#define LOGI(...) WALLET_LOG(INFO, __VA_ARGS__)
+#define LOGW(...) WALLET_LOG(WARN, __VA_ARGS__)
+#define LOGE(...) WALLET_LOG(ERROR, __VA_ARGS__)
 
 static JavaVM *cachedJVM;
 static jclass class_ArrayList;
@@ -135,10 +170,7 @@ static jclass class_WalletListener;
 static jclass class_CoinsInfo;
 static jclass class_TransactionInfo;
 static jclass class_Transfer;
-static jclass class_Ledger;
 static jclass class_WalletStatus;
-static jclass class_BluetoothService;
-static jclass class_SidekickService;
 static jclass class_ExternalSignerNativeBridge;
 static jclass class_ExternalSignerException;
 static jclass class_HardwareWalletErrorCode;
@@ -178,6 +210,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
         return -1;
     }
 
+#ifdef __ANDROID__
     // Install the SIGSEGV handler once, process-wide, at load time.
     // Doing this here avoids per-call install/uninstall races in closeJ.
     struct sigaction sa = {};
@@ -190,6 +223,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
     } else {
         LOGW("JNI_OnLoad: sigaction failed — closeWallet will run without SIGSEGV protection");
     }
+#endif
 
     class_ArrayList = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("java/util/ArrayList")));
@@ -201,12 +235,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
             jenv->FindClass("com/m2049r/xmrwallet/model/Transfer")));
     class_WalletListener = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("com/m2049r/xmrwallet/model/WalletListener")));
-    class_Ledger = static_cast<jclass>(jenv->NewGlobalRef(
-            jenv->FindClass("com/m2049r/xmrwallet/ledger/Ledger")));
     class_WalletStatus = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("com/m2049r/xmrwallet/model/Wallet$Status")));
-    class_BluetoothService = static_cast<jclass>(jenv->NewGlobalRef(
-            jenv->FindClass("com/m2049r/xmrwallet/service/BluetoothService")));
     class_ExternalSignerNativeBridge = static_cast<jclass>(jenv->NewGlobalRef(
             jenv->FindClass("com/piratecash/monero/signer/ExternalSignerNativeBridge")));
     class_ExternalSignerException = static_cast<jclass>(jenv->NewGlobalRef(
@@ -266,7 +296,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
 int attachJVM(JNIEnv **jenv) {
     int envStat = cachedJVM->GetEnv((void **) jenv, JNI_VERSION_1_6);
     if (envStat == JNI_EDETACHED) {
-        if (cachedJVM->AttachCurrentThread(jenv, nullptr) != 0) {
+        // Android's jni.h takes JNIEnv**, the JDK's takes void**.
+#ifdef __ANDROID__
+        jint attached = cachedJVM->AttachCurrentThread(jenv, nullptr);
+#else
+        jint attached = cachedJVM->AttachCurrentThread(reinterpret_cast<void **>(jenv), nullptr);
+#endif
+        if (attached != 0) {
             LOGE("Failed to attach");
             return JNI_ERR;
         }
@@ -1267,9 +1303,10 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeNativeJ(JNIEnv *env, jobject 
         return JNI_FALSE;
     }
 
+    jboolean safeStore = store;
+#ifdef __ANDROID__
     // If handler setup failed at load time, fall back to close without save
     // so we don't crash unprotected.
-    jboolean safeStore = store;
     if (store && !g_safe_close_ready) {
         LOGW("closeJ: SIGSEGV handler not ready — closing without save to avoid unprotected crash");
         safeStore = JNI_FALSE;
@@ -1279,6 +1316,7 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeNativeJ(JNIEnv *env, jobject 
     if (!g_altstack_ready) {
         LOGW("closeJ: sigaltstack failed on this thread — SIGSEGV recovery may be unreliable");
     }
+#endif
 
     // Keep the listener valid until close succeeds. If close fails, Java will
     // re-manage the wallet object and must still have a working listener.
@@ -1312,7 +1350,7 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeNativeJ(JNIEnv *env, jobject 
     if (safeStore) {
         // Best-effort wait for the refresh thread to leave doRefresh().
         // Not a synchronisation guarantee — see SIGSEGV handler below.
-        usleep(200000); // 200 ms
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         int storeStatus = guarded_store(wallet);
         if (storeStatus == 0) {
@@ -1337,12 +1375,9 @@ Java_com_m2049r_xmrwallet_model_WalletManager_closeNativeJ(JNIEnv *env, jobject 
     // Skip if store() already SIGSEGV'd — the wallet object is in an
     // undefined state and must be leaked (see comment above).
     if (!sigsegvOccurred) {
-        if (sigsetjmp(g_close_jmpbuf, 1) == 0) {
-            g_in_safe_close = 1;
-            closeSuccess = Monero::WalletManagerFactory::getWalletManager()->closeWallet(wallet, false);
-            g_in_safe_close = 0;
-        } else {
-            g_in_safe_close = 0;
+        int closeStatus = guarded_close(wallet);
+        closeSuccess = closeStatus == 0;
+        if (closeStatus == 2) {
             sigsegvOccurred = true;
             LOGE("closeJ: SIGSEGV in closeWallet(store=false) — leaking wallet object");
         }
@@ -1677,7 +1712,8 @@ JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_initJ(JNIEnv *env, jobject instance,
                                              jstring daemon_address,
                                              jlong upper_transaction_size_limit,
-                                             jstring daemon_username, jstring daemon_password) {
+                                             jstring daemon_username, jstring daemon_password,
+                                             jstring proxy) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         LOGE("wallet handle is null in %s", __FUNCTION__);
@@ -1686,12 +1722,15 @@ Java_com_m2049r_xmrwallet_model_Wallet_initJ(JNIEnv *env, jobject instance,
     const char *_daemon_address = env->GetStringUTFChars(daemon_address, nullptr);
     const char *_daemon_username = env->GetStringUTFChars(daemon_username, nullptr);
     const char *_daemon_password = env->GetStringUTFChars(daemon_password, nullptr);
+    const char *_proxy = env->GetStringUTFChars(proxy, nullptr);
     bool status = wallet->init(_daemon_address, (uint64_t) upper_transaction_size_limit,
                                _daemon_username,
-                               _daemon_password);
+                               _daemon_password,
+                               false, false, _proxy);
     env->ReleaseStringUTFChars(daemon_address, _daemon_address);
     env->ReleaseStringUTFChars(daemon_username, _daemon_username);
     env->ReleaseStringUTFChars(daemon_password, _daemon_password);
+    env->ReleaseStringUTFChars(proxy, _proxy);
     return static_cast<jboolean>(status);
 }
 
@@ -3052,161 +3091,17 @@ Java_com_m2049r_xmrwallet_model_WalletManager_moneroVersion(JNIEnv *env, jclass 
 }
 
 //
-// Ledger Stuff
+// Ledger and Sidekick transports: libdevice.a links against these, but no app ever
+// connects either device. Zero bytes makes the device code throw instead of reading
+// a -1 length as unsigned.
 //
 
-/**
- * @brief LedgerExchange - exchange data with Ledger Device
- * @param command        - buffer for data to send
- * @param cmd_len        - length of send to send
- * @param response       - buffer for received data
- * @param max_resp_len   - size of receive buffer
- *
- * @return length of received data in response or -1 if error
- */
-int LedgerExchange(
-        unsigned char *command,
-        unsigned int cmd_len,
-        unsigned char *response,
-        unsigned int max_resp_len) {
-    LOGD("LedgerExchange");
-    JNIEnv *jenv;
-    int envStat = attachJVM(&jenv);
-    if (envStat == JNI_ERR) return -1;
-
-    jmethodID exchangeMethod = jenv->GetStaticMethodID(class_Ledger, "Exchange", "([B)[B");
-
-    jsize sendLen = static_cast<jsize>(cmd_len);
-    jbyteArray dataSend = jenv->NewByteArray(sendLen);
-    jenv->SetByteArrayRegion(dataSend, 0, sendLen, (jbyte *) command);
-    jbyteArray dataRecv = (jbyteArray) jenv->CallStaticObjectMethod(class_Ledger, exchangeMethod,
-                                                                    dataSend);
-    jenv->DeleteLocalRef(dataSend);
-    if (dataRecv == nullptr) {
-        detachJVM(jenv, envStat);
-        LOGD("LedgerExchange SCARD_E_NO_READERS_AVAILABLE");
-        return -1;
-    }
-    jsize len = jenv->GetArrayLength(dataRecv);
-    LOGD("LedgerExchange SCARD_S_SUCCESS %u/%d", cmd_len, len);
-    if (len <= max_resp_len) {
-        jenv->GetByteArrayRegion(dataRecv, 0, len, (jbyte *) response);
-        jenv->DeleteLocalRef(dataRecv);
-        detachJVM(jenv, envStat);
-        return static_cast<int>(len);;
-    } else {
-        jenv->DeleteLocalRef(dataRecv);
-        detachJVM(jenv, envStat);
-        LOGE("LedgerExchange SCARD_E_INSUFFICIENT_BUFFER");
-        return -1;
-    }
+int LedgerExchange(unsigned char *, unsigned int, unsigned char *, unsigned int) {
+    return 0;
 }
 
-/**
- * @brief LedgerFind - find Ledger Device and return it's name
- * @param buffer - buffer for name of found device
- * @param len    - length of buffer
- * @return  0 - success
- *         -1 - no device connected / found
- *         -2 - JVM not found
- */
-int LedgerFind(char *buffer, size_t len) {
-    LOGD("LedgerName");
-    JNIEnv *jenv;
-    int envStat = attachJVM(&jenv);
-    if (envStat == JNI_ERR) return -2;
-
-    jmethodID nameMethod = jenv->GetStaticMethodID(class_Ledger, "Name", "()Ljava/lang/String;");
-    jstring name = (jstring) jenv->CallStaticObjectMethod(class_Ledger, nameMethod);
-
-    int ret;
-    if (name != nullptr) {
-        const char *_name = jenv->GetStringUTFChars(name, nullptr);
-        strncpy(buffer, _name, len);
-        jenv->ReleaseStringUTFChars(name, _name);
-        buffer[len - 1] = 0; // terminate in case _name is bigger
-        ret = 0;
-        LOGD("LedgerName is %s", buffer);
-    } else {
-        buffer[0] = 0;
-        ret = -1;
-    }
-
-    detachJVM(jenv, envStat);
-    return ret;
-}
-
-//
-// SidekickWallet Stuff
-//
-
-/**
- * @brief BtExchange     - exchange data with Monerujo Device
- * @param request        - buffer for data to send
- * @param request_len    - length of data to send
- * @param response       - buffer for received data
- * @param max_resp_len   - size of receive buffer
- *
- * @return length of received data in response or -1 if error, -2 if response buffer too small
- */
-int BtExchange(
-        unsigned char *request,
-        unsigned int request_len,
-        unsigned char *response,
-        unsigned int max_resp_len) {
-    JNIEnv *jenv;
-    int envStat = attachJVM(&jenv);
-    if (envStat == JNI_ERR) return -16;
-
-    jmethodID exchangeMethod = jenv->GetStaticMethodID(class_BluetoothService, "Exchange",
-                                                       "([B)[B");
-
-    auto reqLen = static_cast<jsize>(request_len);
-    jbyteArray reqData = jenv->NewByteArray(reqLen);
-    jenv->SetByteArrayRegion(reqData, 0, reqLen, (jbyte *) request);
-    LOGD("BtExchange cmd: 0x%02x with %u bytes", request[0], reqLen);
-    auto dataRecv = (jbyteArray)
-            jenv->CallStaticObjectMethod(class_BluetoothService, exchangeMethod, reqData);
-    jenv->DeleteLocalRef(reqData);
-    if (dataRecv == nullptr) {
-        detachJVM(jenv, envStat);
-        LOGD("BtExchange: error reading");
-        return -1;
-    }
-    jsize respLen = jenv->GetArrayLength(dataRecv);
-    LOGD("BtExchange response is %u bytes", respLen);
-    if (respLen <= max_resp_len) {
-        jenv->GetByteArrayRegion(dataRecv, 0, respLen, (jbyte *) response);
-        jenv->DeleteLocalRef(dataRecv);
-        detachJVM(jenv, envStat);
-        return static_cast<int>(respLen);;
-    } else {
-        jenv->DeleteLocalRef(dataRecv);
-        detachJVM(jenv, envStat);
-        LOGE("BtExchange response buffer too small: %u < %u", respLen, max_resp_len);
-        return -2;
-    }
-}
-
-/**
- * @brief ConfirmTransfers
- * @param transfers - string of "fee (':' address ':' amount)+"
- *
- * @return true on accept, false on reject
- */
-bool ConfirmTransfers(const char *transfers) {
-    JNIEnv *jenv;
-    int envStat = attachJVM(&jenv);
-    if (envStat == JNI_ERR) return -16;
-
-    jmethodID confirmMethod = jenv->GetStaticMethodID(class_SidekickService, "ConfirmTransfers",
-                                                      "(Ljava/lang/String;)Z");
-
-    jstring _transfers = jenv->NewStringUTF(transfers);
-    auto confirmed =
-            jenv->CallStaticBooleanMethod(class_SidekickService, confirmMethod, _transfers);
-    jenv->DeleteLocalRef(_transfers);
-    return confirmed;
+int BtExchange(unsigned char *, unsigned int, unsigned char *, unsigned int) {
+    return 0;
 }
 
 #ifdef __cplusplus

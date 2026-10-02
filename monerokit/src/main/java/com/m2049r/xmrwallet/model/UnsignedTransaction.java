@@ -16,9 +16,13 @@
 
 package com.m2049r.xmrwallet.model;
 
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
+
+@Keep
 public class UnsignedTransaction {
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     public long handle;

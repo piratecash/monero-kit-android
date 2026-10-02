@@ -1,8 +1,8 @@
 package com.m2049r.xmrwallet.service
 
 import com.google.common.net.HostAndPort
-import com.m2049r.levin.util.NetCipherHelper
 import com.m2049r.xmrwallet.data.Node
+import com.piratecash.monero.net.MoneroHttpClient
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -15,7 +15,7 @@ import kotlin.coroutines.resumeWithException
 
 /**
  * Shared plumbing for the daemon's plain (non-JSON-RPC) endpoints: URL building, authentication
- * and a bounded asynchronous call. Requests go through the same [NetCipherHelper] client as all
+ * and a bounded asynchronous call. Requests go through the same [MoneroHttpClient] client as all
  * other daemon calls, so callers relying on Tor keep that protection here too.
  */
 internal object DaemonRpc {
@@ -29,7 +29,7 @@ internal object DaemonRpc {
         password: String,
         timeoutMs: Long,
         parse: (Response) -> T,
-    ): T = NetCipherHelper.Request(url(daemonAddress, path), body, username, password)
+    ): T = MoneroHttpClient.Request(url(daemonAddress, path), body, username, password)
         .newCall(timeoutMs)
         .await(parse)
 
