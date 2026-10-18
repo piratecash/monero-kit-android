@@ -179,6 +179,7 @@ static jmethodID method_ExternalSigner_currentSessionId;
 static jmethodID method_ExternalSigner_writePacket;
 static jmethodID method_ExternalSigner_readPacket;
 static jmethodID method_ExternalSigner_cancel;
+static jmethodID method_ExternalSigner_exchangeApdu;
 static jmethodID method_ExternalSignerException_getHardwareErrorCode;
 static jmethodID method_HardwareWalletErrorCode_getCode;
 static jmethodID method_HardwareWalletErrorCode_fromCode;
@@ -260,6 +261,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
             class_ExternalSignerNativeBridge, "readPacket", "(JJ)[B");
     method_ExternalSigner_cancel = jenv->GetStaticMethodID(
             class_ExternalSignerNativeBridge, "cancel", "(J)V");
+    method_ExternalSigner_exchangeApdu = jenv->GetStaticMethodID(
+            class_ExternalSignerNativeBridge, "exchangeApdu", "(J[B)[B");
     method_ExternalSignerException_getHardwareErrorCode = jenv->GetMethodID(
             class_ExternalSignerException,
             "getHardwareErrorCode",
@@ -280,6 +283,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
             || method_ExternalSigner_writePacket == nullptr
             || method_ExternalSigner_readPacket == nullptr
             || method_ExternalSigner_cancel == nullptr
+            || method_ExternalSigner_exchangeApdu == nullptr
             || method_ExternalSignerException_getHardwareErrorCode == nullptr
             || method_HardwareWalletErrorCode_getCode == nullptr
             || method_HardwareWalletErrorCode_fromCode == nullptr
@@ -326,6 +330,7 @@ void detachJVM(JNIEnv *jenv, int envStat) {
 }
 
 static thread_local jint external_signer_error_code = 0;
+static thread_local bool ledger_exchange_failed = false;
 
 static jint capture_external_signer_exception(JNIEnv *env) {
     jthrowable throwable = env->ExceptionOccurred();
@@ -364,6 +369,7 @@ static void record_external_signer_primary_error(jint code) {
 
 static void begin_external_signer_operation() {
     external_signer_error_code = 0;
+    ledger_exchange_failed = false;
 }
 
 static bool throw_external_signer_error(JNIEnv *env) {
@@ -401,16 +407,28 @@ static bool throw_external_signer_error(JNIEnv *env) {
     return true;
 }
 
+// device_ledger turns a failed exchange into a generic exception (Status_Critical on open), so then
+// the channel's own error is the cause: a device failure, never corrupted wallet files.
+static bool channel_error_is_primary(Monero::Wallet::Device device_type) {
+    return device_type == Monero::Wallet::Device_Ledger && ledger_exchange_failed;
+}
+
+static bool device_uses_external_signer(Monero::Wallet::Device device_type) {
+    return device_type == Monero::Wallet::Device_Trezor
+            || device_type == Monero::Wallet::Device_Ledger;
+}
+
 static bool complete_external_signer_wallet_operation(
         JNIEnv *env,
-        Monero::Wallet *wallet) {
+        Monero::Wallet *wallet,
+        Monero::Wallet::Device device_type) {
     jint code = external_signer_error_code;
     if (code == 0) {
         return false;
     }
     if (wallet != nullptr) {
         external_signer_error_code = 0;
-        if (wallet->hardwareWalletErrorCode() == 0) {
+        if (channel_error_is_primary(device_type) || wallet->hardwareWalletErrorCode() == 0) {
             wallet->setHardwareWalletError(code, "External signer operation failed");
         }
         return false;
@@ -418,20 +436,31 @@ static bool complete_external_signer_wallet_operation(
     return throw_external_signer_error(env);
 }
 
-static bool wallet_uses_external_signer(
+static void record_wallet_hardware_error(
+        Monero::Wallet *wallet,
+        Monero::Wallet::Device device_type) {
+    const int hardware_error_code = wallet->hardwareWalletErrorCode();
+    if (hardware_error_code != 0
+            && !(channel_error_is_primary(device_type) && external_signer_error_code != 0)) {
+        record_external_signer_primary_error(hardware_error_code);
+    }
+}
+
+static Monero::Wallet::Device query_wallet_device(
         Monero::WalletManager *wallet_manager,
         const std::string &keys_file_name,
         const std::string &password) {
     Monero::Wallet::Device device_type = Monero::Wallet::Device_Software;
     try {
-        return wallet_manager->queryWalletDevice(device_type, keys_file_name, password)
-                && device_type == Monero::Wallet::Device_Trezor;
+        if (wallet_manager->queryWalletDevice(device_type, keys_file_name, password)) {
+            return device_type;
+        }
     } catch (const std::exception &error) {
         LOGW("Unable to query wallet device before opening: %s", error.what());
     } catch (...) {
         LOGW("Unable to query wallet device before opening");
     }
-    return false;
+    return Monero::Wallet::Device_Software;
 }
 
 extern "C" int monero_external_signer_current_generation(int64_t *generation) {
@@ -474,6 +503,7 @@ extern "C" int monero_external_signer_validate_generation(int64_t generation) {
 
 struct ExternalSignerTransactionOperation {
     bool active = false;
+    Monero::Wallet::Device device_type = Monero::Wallet::Device_Software;
     int64_t generation = 0;
 };
 
@@ -481,7 +511,8 @@ static bool begin_external_signer_transaction(
         JNIEnv *env,
         Monero::Wallet *wallet,
         ExternalSignerTransactionOperation &operation) {
-    operation.active = wallet->getDeviceType() == Monero::Wallet::Device_Trezor;
+    operation.device_type = wallet->getDeviceType();
+    operation.active = device_uses_external_signer(operation.device_type);
     if (!operation.active) {
         return true;
     }
@@ -501,10 +532,7 @@ static bool complete_external_signer_transaction(
     if (!operation.active) {
         return true;
     }
-    const jint hardware_error_code = wallet->hardwareWalletErrorCode();
-    if (hardware_error_code != 0) {
-        record_external_signer_primary_error(hardware_error_code);
-    }
+    record_wallet_hardware_error(wallet, operation.device_type);
     monero_external_signer_validate_generation(operation.generation);
     if (!throw_external_signer_error(env)) {
         return true;
@@ -982,16 +1010,15 @@ Java_com_m2049r_xmrwallet_model_WalletManager_openWalletJ(JNIEnv *env, jobject i
 
     begin_external_signer_operation();
     Monero::Wallet *wallet = nullptr;
+    Monero::Wallet::Device device_type = Monero::Wallet::Device_Software;
     int64_t signer_generation = 0;
     try {
         const std::string path_value = wallet_path.string();
         const std::string password_value = wallet_password.string();
         Monero::WalletManager *wallet_manager =
                 Monero::WalletManagerFactory::getWalletManager();
-        const bool uses_external_signer = wallet_uses_external_signer(
-                wallet_manager,
-                path_value + ".keys",
-                password_value);
+        device_type = query_wallet_device(wallet_manager, path_value + ".keys", password_value);
+        const bool uses_external_signer = device_uses_external_signer(device_type);
         if (!uses_external_signer
                 || monero_external_signer_current_generation(&signer_generation) == 0) {
             wallet = wallet_manager->openWallet(
@@ -1009,7 +1036,7 @@ Java_com_m2049r_xmrwallet_model_WalletManager_openWalletJ(JNIEnv *env, jobject i
         LOGE("openWalletJ failed with an unknown exception");
         record_external_signer_error(25);
     }
-    if (complete_external_signer_wallet_operation(env, wallet)) {
+    if (complete_external_signer_wallet_operation(env, wallet, device_type)) {
         return 0;
     }
     return reinterpret_cast<jlong>(wallet);
@@ -1111,10 +1138,15 @@ Java_com_m2049r_xmrwallet_model_WalletManager_createWalletFromDeviceJ(JNIEnv *en
 
     begin_external_signer_operation();
     Monero::Wallet *wallet = nullptr;
+    const std::string device_name_value = device_name.string();
+    const Monero::Wallet::Device device_type = device_name_value == "Trezor"
+            ? Monero::Wallet::Device_Trezor
+            : device_name_value == "Ledger"
+                    ? Monero::Wallet::Device_Ledger
+                    : Monero::Wallet::Device_Software;
     int64_t signer_generation = 0;
     try {
-        const std::string device_name_value = device_name.string();
-        const bool uses_external_signer = device_name_value == "Trezor";
+        const bool uses_external_signer = device_uses_external_signer(device_type);
         if (!uses_external_signer
                 || monero_external_signer_current_generation(&signer_generation) == 0) {
             wallet =
@@ -1136,7 +1168,7 @@ Java_com_m2049r_xmrwallet_model_WalletManager_createWalletFromDeviceJ(JNIEnv *en
         LOGE("createWalletFromDeviceJ failed with an unknown exception");
         record_external_signer_error(25);
     }
-    if (complete_external_signer_wallet_operation(env, wallet)) {
+    if (complete_external_signer_wallet_operation(env, wallet, device_type)) {
         return 0;
     }
     return reinterpret_cast<jlong>(wallet);
@@ -1532,11 +1564,12 @@ Java_com_m2049r_xmrwallet_model_Wallet_deviceShowAddressJ(
         ThrowException(env, "java/lang/IllegalStateException", "Monero wallet is closed");
         return;
     }
-    if (wallet->getDeviceType() != Monero::Wallet::Device_Trezor) {
+    const Monero::Wallet::Device device_type = wallet->getDeviceType();
+    if (!device_uses_external_signer(device_type)) {
         ThrowException(
                 env,
                 "java/lang/IllegalStateException",
-                "Address display requires a Trezor wallet");
+                "Address display requires a hardware wallet");
         return;
     }
     ScopedUtfChars paymentId(env, payment_id);
@@ -1557,10 +1590,7 @@ Java_com_m2049r_xmrwallet_model_Wallet_deviceShowAddressJ(
             static_cast<uint32_t>(account_index),
             static_cast<uint32_t>(address_index),
             paymentId.string());
-    const int hardware_error_code = wallet->hardwareWalletErrorCode();
-    if (hardware_error_code != 0) {
-        record_external_signer_primary_error(hardware_error_code);
-    }
+    record_wallet_hardware_error(wallet, device_type);
     monero_external_signer_validate_generation(signer_generation);
     if (throw_external_signer_error(env)) {
         return;
@@ -3013,6 +3043,14 @@ Java_com_m2049r_xmrwallet_model_PendingTransaction_getTxCount(JNIEnv *env, jobje
 //static void info(const std::string &category, const std::string &str);
 //static void warning(const std::string &category, const std::string &str);
 //static void error(const std::string &category, const std::string &str);
+// device_ledger logs every APDU at DEBUG, the exported view key included, and "device" logs the
+// device's encrypted secrets; appended last, these caps win over any level set before them.
+static const char DEVICE_LOG_CAPS[] = "device:WARNING,device.ledger:WARNING";
+
+static void cap_device_logging() {
+    Monero::WalletManagerFactory::setLogCategories(std::string("+") + DEVICE_LOG_CAPS);
+}
+
 JNIEXPORT void JNICALL
 Java_com_m2049r_xmrwallet_model_WalletManager_initLogger(JNIEnv *env, jclass clazz,
                                                          jstring argv0,
@@ -3022,6 +3060,8 @@ Java_com_m2049r_xmrwallet_model_WalletManager_initLogger(JNIEnv *env, jclass cla
     const char *_default_log_base_name = env->GetStringUTFChars(default_log_base_name, nullptr);
 
     Monero::Wallet::init(_argv0, _default_log_base_name);
+    // Not atomic: mlog_configure installs MONERO_LOGS first; unset, that is level 0, which already caps device.
+    cap_device_logging();
 
     env->ReleaseStringUTFChars(argv0, _argv0);
     env->ReleaseStringUTFChars(default_log_base_name, _default_log_base_name);
@@ -3082,7 +3122,8 @@ Java_com_m2049r_xmrwallet_model_WalletManager_logError(JNIEnv *env, jclass clazz
 JNIEXPORT void JNICALL
 Java_com_m2049r_xmrwallet_model_WalletManager_setLogLevel(JNIEnv *env, jclass clazz,
                                                           jint level) {
-    Monero::WalletManagerFactory::setLogLevel(level);
+    // mlog_set_log expands "<level>,<categories>" into one configuration, so no moment lacks the caps.
+    Monero::WalletManagerFactory::setLogCategories(std::to_string(level) + "," + DEVICE_LOG_CAPS);
 }
 
 JNIEXPORT jstring JNICALL
@@ -3090,14 +3131,114 @@ Java_com_m2049r_xmrwallet_model_WalletManager_moneroVersion(JNIEnv *env, jclass 
     return env->NewStringUTF(MONERO_VERSION);
 }
 
+static void wipe_java_bytes(JNIEnv *env, jbyteArray array) {
+    if (array == nullptr) {
+        return;
+    }
+    const jsize size = env->GetArrayLength(array);
+    jbyte *bytes = env->GetByteArrayElements(array, nullptr);
+    if (bytes != nullptr) {
+        std::memset(bytes, 0, static_cast<size_t>(size));
+        env->ReleaseByteArrayElements(array, bytes, 0);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+}
+
+static jint exchange_apdu(
+        JNIEnv *env,
+        int64_t generation,
+        const unsigned char *command,
+        unsigned int cmd_len,
+        unsigned char *response,
+        unsigned int max_resp_len,
+        jsize *response_size) {
+    jbyteArray java_command = env->NewByteArray(static_cast<jsize>(cmd_len));
+    if (java_command == nullptr) {
+        return env->ExceptionCheck() ? capture_external_signer_exception(env) : 25;
+    }
+    env->SetByteArrayRegion(
+            java_command, 0, static_cast<jsize>(cmd_len), reinterpret_cast<const jbyte *>(command));
+    jbyteArray java_response = nullptr;
+    if (!env->ExceptionCheck()) {
+        JavaCallbackScope callback_scope;
+        java_response = static_cast<jbyteArray>(env->CallStaticObjectMethod(
+                class_ExternalSignerNativeBridge,
+                method_ExternalSigner_exchangeApdu,
+                static_cast<jlong>(generation),
+                java_command));
+    }
+    jint result = 0;
+    if (env->ExceptionCheck()) {
+        result = capture_external_signer_exception(env);
+    } else {
+        *response_size = java_response == nullptr ? 0 : env->GetArrayLength(java_response);
+        if (*response_size < 2 || static_cast<unsigned int>(*response_size) > max_resp_len) {
+            result = 11;
+        } else {
+            env->GetByteArrayRegion(
+                    java_response, 0, *response_size, reinterpret_cast<jbyte *>(response));
+            if (env->ExceptionCheck()) {
+                result = capture_external_signer_exception(env);
+            }
+        }
+    }
+    // APDUs carry the exported view key and transaction secrets.
+    wipe_java_bytes(env, java_response);
+    wipe_java_bytes(env, java_command);
+    return result;
+}
+
 //
-// Ledger and Sidekick transports: libdevice.a links against these, but no app ever
-// connects either device. Zero bytes makes the device code throw instead of reading
-// a -1 length as unsigned.
+// Ledger exchanges whole APDUs through the registered external signer channel. Any failure
+// returns zero bytes: device_ledger throws on fewer than two, while a negative length would be
+// read as unsigned. Sidekick is never connected.
 //
 
-int LedgerExchange(unsigned char *, unsigned int, unsigned char *, unsigned int) {
-    return 0;
+static int exchange_with_ledger(
+        unsigned char *command,
+        unsigned int cmd_len,
+        unsigned char *response,
+        unsigned int max_resp_len) {
+    int64_t generation = 0;
+    if (command == nullptr || response == nullptr
+            || monero_external_signer_current_generation(&generation) != 0) {
+        return 0;
+    }
+    JNIEnv *env;
+    int env_state = attachJVM(&env);
+    if (env_state == JNI_ERR) {
+        record_external_signer_error(25);
+        return 0;
+    }
+    if (env->PushLocalFrame(4) != JNI_OK) {
+        detachJVM(env, env_state);
+        record_external_signer_error(25);
+        return 0;
+    }
+    jsize response_size = 0;
+    const jint result = exchange_apdu(
+            env, generation, command, cmd_len, response, max_resp_len, &response_size);
+    env->PopLocalFrame(nullptr);
+    detachJVM(env, env_state);
+    if (result != 0) {
+        record_external_signer_error(result);
+        return 0;
+    }
+    return static_cast<int>(response_size);
+}
+
+int LedgerExchange(
+        unsigned char *command,
+        unsigned int cmd_len,
+        unsigned char *response,
+        unsigned int max_resp_len) {
+    const int response_size = exchange_with_ledger(command, cmd_len, response, max_resp_len);
+    if (response_size == 0) {
+        ledger_exchange_failed = true;
+    }
+    return response_size;
 }
 
 int BtExchange(unsigned char *, unsigned int, unsigned char *, unsigned int) {

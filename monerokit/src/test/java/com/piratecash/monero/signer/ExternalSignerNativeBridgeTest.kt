@@ -7,6 +7,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -385,6 +386,164 @@ class ExternalSignerNativeBridgeTest {
         }
     }
 
+    @Test
+    fun exchangeApdu_apduChannelRegistered_forwardsWholeApdu() {
+        val command = byteArrayOf(0x00, 0x20, 0x01, 0x00, 0x00)
+        val response = byteArrayOf(0x42, 0x90.toByte(), 0x00)
+        var received: ByteArray? = null
+        val registration = ExternalSigner.registerApdu(apduChannel { received = it; response })
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+
+            assertArrayEquals(response, ExternalSignerNativeBridge.exchangeApdu(generation, command))
+            assertArrayEquals(command, received)
+        } finally {
+            registration.release()
+        }
+    }
+
+    @Test
+    fun exchangeApdu_generationReleased_throwsNoChannel() {
+        val registration = ExternalSigner.registerApdu(apduChannel { ByteArray(2) })
+        val generation = ExternalSignerNativeBridge.currentGeneration()
+        registration.release()
+
+        val error = assertSignerError { ExternalSignerNativeBridge.exchangeApdu(generation, ByteArray(5)) }
+
+        assertEquals(ExternalSignerError.NO_CHANNEL, error.error)
+    }
+
+    @Test
+    fun exchangeApdu_cancellationSignalled_throwsCancelled() {
+        val registration = ExternalSigner.registerApdu(apduChannel { ByteArray(2) })
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+            registration.signalCancellation()
+
+            val error = assertSignerError { ExternalSignerNativeBridge.exchangeApdu(generation, ByteArray(5)) }
+
+            assertEquals(ExternalSignerError.CANCELLED, error.error)
+        } finally {
+            registration.release()
+        }
+    }
+
+    @Test
+    fun exchangeApdu_transportFails_throwsChannelFailure() {
+        val registration = ExternalSigner.registerApdu(apduChannel { throw IOException("unplugged") })
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+
+            val error = assertSignerError { ExternalSignerNativeBridge.exchangeApdu(generation, ByteArray(5)) }
+
+            assertEquals(ExternalSignerError.CHANNEL_FAILURE, error.error)
+        } finally {
+            registration.release()
+        }
+    }
+
+    @Test
+    fun exchangeApdu_cancelledWhileExchanging_throwsCancelled() {
+        lateinit var registration: ExternalSignerRegistration
+        registration = ExternalSigner.registerApdu(
+            apduChannel {
+                registration.signalCancellation()
+                throw IOException("transport closed by cancellation")
+            },
+        )
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+
+            val error = assertSignerError { ExternalSignerNativeBridge.exchangeApdu(generation, ByteArray(5)) }
+
+            assertEquals(ExternalSignerError.CANCELLED, error.error)
+        } finally {
+            registration.release()
+        }
+    }
+
+    @Test
+    fun writePacket_apduChannelRegistered_throwsChannelFailure() {
+        val registration = ExternalSigner.registerApdu(apduChannel { ByteArray(2) })
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+
+            val error = assertSignerError {
+                ExternalSignerNativeBridge.writePacket(generation, ByteArray(PACKET_SIZE))
+            }
+
+            assertEquals(ExternalSignerError.CHANNEL_FAILURE, error.error)
+        } finally {
+            registration.release()
+        }
+    }
+
+    @Test
+    fun exchangeApdu_viewKeyExportDenied_throwsViewKeyExportDenied() {
+        val error = assertSignerError { exchangeOnce(GET_SECRET_VIEW_KEY) { SW_DENY } }
+
+        assertEquals(HardwareWalletErrorCode.ViewKeyExportDenied, error.hardwareErrorCode)
+    }
+
+    @Test
+    fun exchangeApdu_addressDisplayDenied_returnsDeviceResponse() {
+        val displayAddress = byteArrayOf(0x04, 0x21, 0x00, 0x00, 0x01, 0x00)
+
+        assertArrayEquals(SW_DENY, exchangeOnce(displayAddress) { SW_DENY })
+    }
+
+    @Test
+    fun exchangeApdu_channelReportsDisconnected_throwsDisconnected() {
+        val error = assertSignerError {
+            exchangeOnce(GET_SECRET_VIEW_KEY) {
+                throw ExternalSignerException(HardwareWalletErrorCode.Disconnected, "unplugged")
+            }
+        }
+
+        assertEquals(HardwareWalletErrorCode.Disconnected, error.hardwareErrorCode)
+    }
+
+    @Test
+    fun exchangeApdu_cancelledWhileChannelReportsDisconnected_throwsCancelled() {
+        lateinit var registration: ExternalSignerRegistration
+        registration = ExternalSigner.registerApdu(
+            apduChannel {
+                registration.signalCancellation()
+                throw ExternalSignerException(HardwareWalletErrorCode.Disconnected, "transport closed")
+            },
+        )
+
+        try {
+            val generation = ExternalSignerNativeBridge.currentGeneration()
+
+            val error = assertSignerError { ExternalSignerNativeBridge.exchangeApdu(generation, ByteArray(5)) }
+
+            assertEquals(ExternalSignerError.CANCELLED, error.error)
+        } finally {
+            registration.release()
+        }
+    }
+
+    private fun exchangeOnce(command: ByteArray, exchange: (ByteArray) -> ByteArray): ByteArray {
+        val registration = ExternalSigner.registerApdu(apduChannel(exchange))
+        try {
+            return ExternalSignerNativeBridge.exchangeApdu(ExternalSignerNativeBridge.currentGeneration(), command)
+        } finally {
+            registration.release()
+        }
+    }
+
+    private fun apduChannel(exchange: (ByteArray) -> ByteArray) = object : ExternalSignerApduChannel {
+        override fun exchange(apdu: ByteArray): ByteArray = exchange(apdu)
+
+        override fun cancel() = Unit
+    }
+
     private fun channel(
         write: (ByteArray) -> Unit = {},
         read: (Long) -> ByteArray = { ByteArray(PACKET_SIZE) },
@@ -427,5 +586,7 @@ class ExternalSignerNativeBridgeTest {
         const val PACKET_SIZE = 64
         const val DEADLINE_NANOS = 123L
         val TEST_SESSION_ID = byteArrayOf(1, 2, 3)
+        val GET_SECRET_VIEW_KEY = byteArrayOf(0x04, 0x20, 0x02, 0x00, 0x01, 0x00)
+        val SW_DENY = byteArrayOf(0x69, 0x82.toByte())
     }
 }

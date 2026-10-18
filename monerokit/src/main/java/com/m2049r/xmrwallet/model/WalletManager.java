@@ -133,15 +133,13 @@ public class WalletManager {
     public Wallet openAccount(String path, int accountIndex, String password) {
         long walletHandle = openWalletJ(path, password, getNetworkType().getValue());
         Wallet wallet = new Wallet(walletHandle, accountIndex);
+        wallet.recordOpenResult();
         manageWallet(wallet);
         return wallet;
     }
 
     public Wallet openWallet(String path, String password) {
-        long walletHandle = openWalletJ(path, password, getNetworkType().getValue());
-        Wallet wallet = new Wallet(walletHandle);
-        manageWallet(wallet);
-        return wallet;
+        return openAccount(path, 0, password);
     }
 
     private native long openWalletJ(String path, String password, int networkType);
@@ -200,8 +198,12 @@ public class WalletManager {
 
     private native boolean closeNativeJ(Wallet wallet, boolean store);
 
+    private boolean closeStoringIfOpened(Wallet wallet, boolean store) {
+        return closeNativeJ(wallet, store && !wallet.isOpenFailed());
+    }
+
     public boolean closeJ(Wallet wallet, boolean store) {
-        boolean closed = wallet.closeNative(() -> closeNativeJ(wallet, store));
+        boolean closed = wallet.closeNative(() -> closeStoringIfOpened(wallet, store));
         if (closed) clearManagedWalletIfCurrent(wallet);
         return closed;
     }
@@ -217,7 +219,7 @@ public class WalletManager {
         }
         boolean closed = false;
         try {
-            closed = closeNativeJ(wallet, store);
+            closed = closeStoringIfOpened(wallet, store);
             return closed;
         } finally {
             if (!closed && unmanaged) restoreManagedWalletIfEmpty(wallet);

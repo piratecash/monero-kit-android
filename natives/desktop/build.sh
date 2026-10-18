@@ -29,7 +29,11 @@ sync_sources() {
     rsync -a --delete "${excludes[@]}" "$MONERO/" "$dir/src/"
     monero_tree_manifest "$dir/src" > "$dir/SOURCE.manifest"
     local p
-    for p in "$HERE"/patches/*.patch; do patch -p1 -F0 -s -d "$dir/src" -i "$p"; done
+    for p in "$HERE"/patches/*.patch; do
+        # The monero tree may already carry a patch the Android libraries need too.
+        patch -p1 -F0 -s -f -R --dry-run -d "$dir/src" -i "$p" >/dev/null 2>&1 && continue
+        patch -p1 -F0 -s -d "$dir/src" -i "$p"
+    done
 }
 
 attest() {

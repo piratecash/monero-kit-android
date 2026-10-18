@@ -9,15 +9,27 @@ package com.piratecash.monero.signer
  *
  * [cancel] must be idempotent, return promptly, and unblock every active packet call.
  */
-interface ExternalSignerChannel {
+interface ExternalSignerChannel : ExternalSignerTransport {
     @Throws(ExternalSignerException::class)
     fun writePacket(packet: ByteArray)
 
     @Throws(ExternalSignerException::class)
     fun readPacket(deadlineNanos: Long): ByteArray
+}
 
+/** What every vendor channel shares: [cancel] must be idempotent, return promptly, and unblock active calls. */
+interface ExternalSignerTransport {
     @Throws(ExternalSignerException::class)
     fun cancel()
+}
+
+/**
+ * Ledger: one whole APDU in, the response data plus its status word out. Calls run on native worker threads.
+ * A lost transport throws [ExternalSignerException] with [HardwareWalletErrorCode.Disconnected].
+ */
+interface ExternalSignerApduChannel : ExternalSignerTransport {
+    @Throws(ExternalSignerException::class)
+    fun exchange(apdu: ByteArray): ByteArray
 }
 
 interface ExternalSignerRegistration {
@@ -45,4 +57,9 @@ object ExternalSigner {
         sessionId: ByteArray,
     ): ExternalSignerRegistration =
         ExternalSignerNativeBridge.register(channel, sessionId)
+
+    @JvmStatic
+    @Throws(ExternalSignerException::class)
+    fun registerApdu(channel: ExternalSignerApduChannel): ExternalSignerRegistration =
+        ExternalSignerNativeBridge.registerApdu(channel)
 }

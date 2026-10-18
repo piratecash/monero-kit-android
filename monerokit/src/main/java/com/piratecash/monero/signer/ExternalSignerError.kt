@@ -9,6 +9,7 @@ enum class ExternalSignerError(val hardwareErrorCode: HardwareWalletErrorCode) {
     CANCELLED(HardwareWalletErrorCode.Cancelled),
     CHANNEL_FAILURE(HardwareWalletErrorCode.Protocol),
     CHANNEL_ALREADY_REGISTERED(HardwareWalletErrorCode.AcquireTimeout),
+    VIEW_KEY_EXPORT_DENIED(HardwareWalletErrorCode.ViewKeyExportDenied),
     ;
 
     val code: Int

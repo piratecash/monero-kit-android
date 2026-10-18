@@ -31,6 +31,8 @@ Steps, per target:
    `TREZOR_ANDROID_COLD_ONLY` stay as they are: both are part of the wallet files' behaviour.
    `patches/boost-1.64-optional.patch`: boost 1.64 in depends lacks `optional::has_value()`
    (Android builds with boost 1.70).
+   `patches/ledger-tx-lock.patch`: a Ledger lost mid-transaction no longer keeps the device locked.
+   The monero tree carries it too (the Android libraries need it), so a patch already applied is skipped.
 3. `contrib/depends` builds boost, openssl, unbound, sodium, protobuf, ... for the host.
 4. monero `wallet_api` with the Android flags (`MONERUJO`, Trezor with the external-signer
    transport, `STATIC`, `Release`) — the archives are collected in `<target>/out`.

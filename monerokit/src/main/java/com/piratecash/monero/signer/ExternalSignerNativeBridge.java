@@ -11,6 +11,10 @@ import java.util.concurrent.TimeoutException;
 @Keep
 final class ExternalSignerNativeBridge {
     private static final int PACKET_SIZE = 64;
+    private static final int LEDGER_INS_OFFSET = 1;
+    private static final int LEDGER_P1_OFFSET = 2;
+    private static final byte MONERO_INS_GET_KEY = 0x20;
+    private static final byte MONERO_KEY_SECRET_VIEW = 0x02;
     private static final long DEFAULT_RELEASE_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5);
     private static final AtomicLong NEXT_GENERATION = new AtomicLong();
 
@@ -31,6 +35,21 @@ final class ExternalSignerNativeBridge {
                     "Trezor session ID is required"
             );
         }
+        return registerTransport(channel, sessionId);
+    }
+
+    @NonNull
+    static synchronized ExternalSignerRegistration registerApdu(
+            @NonNull ExternalSignerApduChannel channel
+    ) throws ExternalSignerException {
+        return registerTransport(channel, new byte[0]);
+    }
+
+    @NonNull
+    private static ExternalSignerRegistration registerTransport(
+            @NonNull ExternalSignerTransport channel,
+            @NonNull byte[] sessionId
+    ) throws ExternalSignerException {
         if (current != null) {
             throw failure(
                     ExternalSignerError.CHANNEL_ALREADY_REGISTERED,
@@ -78,7 +97,7 @@ final class ExternalSignerNativeBridge {
 
         Entry entry = acquire(generation);
         try {
-            entry.channel.writePacket(packet);
+            channelOf(entry, ExternalSignerChannel.class).writePacket(packet);
             requireOpen(entry);
         } catch (ExternalSignerException error) {
             throw error;
@@ -98,7 +117,7 @@ final class ExternalSignerNativeBridge {
         Entry entry = acquire(generation);
         final byte[] packet;
         try {
-            packet = entry.channel.readPacket(deadlineNanos);
+            packet = channelOf(entry, ExternalSignerChannel.class).readPacket(deadlineNanos);
             requireOpen(entry);
         } catch (ExternalSignerException error) {
             throw error;
@@ -119,6 +138,61 @@ final class ExternalSignerNativeBridge {
             );
         }
         return packet;
+    }
+
+    @NonNull
+    static byte[] exchangeApdu(long generation, @NonNull byte[] apdu)
+            throws ExternalSignerException {
+        Entry entry = acquire(generation);
+        try {
+            byte[] response = channelOf(entry, ExternalSignerApduChannel.class).exchange(apdu);
+            requireOpen(entry);
+            if (isViewKeyExportDenied(apdu, response)) {
+                throw failure(
+                        ExternalSignerError.VIEW_KEY_EXPORT_DENIED,
+                        "View key export was rejected on the device"
+                );
+            }
+            return response;
+        } catch (ExternalSignerException error) {
+            // Cancellation closes the transport, so the channel's own failure is the cancellation.
+            requireOpen(entry);
+            throw error;
+        } catch (Exception error) {
+            requireOpen(entry);
+            throw failure(
+                    ExternalSignerError.CHANNEL_FAILURE,
+                    "External signer exchange failed",
+                    error
+            );
+        } finally {
+            releaseCall(entry);
+        }
+    }
+
+    // device_ledger would read the stale receive buffer as the view key and silently miss payments.
+    private static boolean isViewKeyExportDenied(@NonNull byte[] apdu, @NonNull byte[] response) {
+        int length = response.length;
+        return apdu.length > LEDGER_P1_OFFSET
+                && apdu[LEDGER_INS_OFFSET] == MONERO_INS_GET_KEY
+                && apdu[LEDGER_P1_OFFSET] == MONERO_KEY_SECRET_VIEW
+                && length >= 2
+                && response[length - 2] == (byte) 0x69
+                && response[length - 1] == (byte) 0x82;
+    }
+
+    @NonNull
+    private static <T extends ExternalSignerTransport> T channelOf(
+            @NonNull Entry entry,
+            @NonNull Class<T> type
+    ) throws ExternalSignerException {
+        if (!type.isInstance(entry.channel)) {
+            throw failure(
+                    ExternalSignerError.CHANNEL_FAILURE,
+                    "The registered channel is not a " + type.getSimpleName()
+            );
+        }
+        return type.cast(entry.channel);
     }
 
     static void cancel(long generation) throws ExternalSignerException {
@@ -377,7 +451,7 @@ final class ExternalSignerNativeBridge {
     private static final class Entry {
         private final long generation;
         @NonNull
-        private final ExternalSignerChannel channel;
+        private final ExternalSignerTransport channel;
         @NonNull
         private final byte[] sessionId;
         private int activeCalls;
@@ -390,7 +464,7 @@ final class ExternalSignerNativeBridge {
 
         private Entry(
                 long generation,
-                @NonNull ExternalSignerChannel channel,
+                @NonNull ExternalSignerTransport channel,
                 @NonNull byte[] sessionId
         ) {
             this.generation = generation;

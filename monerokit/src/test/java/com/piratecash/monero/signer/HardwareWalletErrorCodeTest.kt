@@ -9,7 +9,7 @@ class HardwareWalletErrorCodeTest {
     fun codes_publicContract_areContiguousAndRoundTrip() {
         val codes = HardwareWalletErrorCode.entries
 
-        assertEquals((1..31).toList(), codes.map(HardwareWalletErrorCode::code))
+        assertEquals((1..32).toList(), codes.map(HardwareWalletErrorCode::code))
         codes.forEach { code ->
             assertEquals(code, HardwareWalletErrorCode.fromCode(code.code))
             assertEquals(code, HardwareWalletErrorCode.fromCodeOrNull(code.code))

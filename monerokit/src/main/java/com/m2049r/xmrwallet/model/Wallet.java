@@ -118,6 +118,8 @@ public class Wallet {
     private long handle = 0;
     private long listenerHandle = 0;
     private final WalletNativeCallGate nativeCallGate = new WalletNativeCallGate();
+    // After a failed open wallet2 holds no loaded cache: storing it would overwrite the wallet files.
+    private volatile boolean openFailed;
 
     Wallet(long handle) {
         this.handle = handle;
@@ -269,6 +271,14 @@ public class Wallet {
         return close(false);
     }
 
+    void recordOpenResult() {
+        openFailed = getStatus().getStatus() != StatusEnum.Status_Ok;
+    }
+
+    boolean isOpenFailed() {
+        return openFailed;
+    }
+
     boolean closeNative(BooleanSupplier action) {
         return nativeCallGate.close(() -> {
             disposePendingTransaction();
@@ -284,7 +294,15 @@ public class Wallet {
         String proxy = MoneroProxy.current();
         // Manager daemon RPCs (blockchainHeight etc.) must take the same route as wallet2.
         walletManager.setProxy(proxy);
-        return initJ(walletManager.getDaemonAddress(), upper_transaction_size_limit, walletManager.getDaemonUsername(), walletManager.getDaemonPassword(), proxy);
+        // wallet_api moves a never-synced wallet's restore height to the daemon tip and exempts only
+        // Trezor; a Ledger wallet would then skip every payment received before that tip.
+        boolean keepsRestoreHeight = getDeviceType() == Device.Ledger;
+        long restoreHeight = keepsRestoreHeight ? getRestoreHeight() : 0;
+        boolean initialized = initJ(walletManager.getDaemonAddress(), upper_transaction_size_limit, walletManager.getDaemonUsername(), walletManager.getDaemonPassword(), proxy);
+        if (keepsRestoreHeight) {
+            setRestoreHeight(restoreHeight);
+        }
+        return initialized;
     }
 
     private native boolean initJ(String daemon_address, long upper_transaction_size_limit, String daemon_username, String daemon_password, String proxy);

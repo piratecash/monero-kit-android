@@ -35,6 +35,7 @@ enum class HardwareWalletErrorCode(val code: Int) {
     EmptyTransaction(29),
     SplitTransactionUnsupported(30),
     Cancelled(31),
+    ViewKeyExportDenied(32),
     ;
 
     companion object {

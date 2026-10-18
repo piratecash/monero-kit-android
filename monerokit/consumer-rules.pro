@@ -37,6 +37,7 @@
     static byte[] currentSessionId(long);
     static void writePacket(long, byte[]);
     static byte[] readPacket(long, long);
+    static byte[] exchangeApdu(long, byte[]);
     static void cancel(long);
 }
 
