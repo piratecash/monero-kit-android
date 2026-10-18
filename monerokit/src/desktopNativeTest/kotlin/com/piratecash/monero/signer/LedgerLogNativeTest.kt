@@ -5,6 +5,7 @@ import com.m2049r.xmrwallet.model.WalletManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -16,8 +17,7 @@ class LedgerLogNativeTest {
 
     @Test
     fun setLogLevel_debugDuringLedgerExchanges_logsNoDeviceTraffic() {
-        val logFile = File(temp.root, "native.log")
-        WalletManager.initLogger(File(temp.root, "native").path, logFile.name)
+        val logFile = initLoggerInTemp()
         WalletManager.setLogLevel(DEBUG_LOG_LEVEL)
         val registration = ExternalSigner.registerApdu(SecretAnsweringLedger)
         try {
@@ -36,8 +36,7 @@ class LedgerLogNativeTest {
 
     @Test
     fun setLogLevel_everyLevel_neverInstallsUncappedDeviceLogging() {
-        val logFile = File(temp.root, "native.log")
-        WalletManager.initLogger(File(temp.root, "native").path, logFile.name)
+        val logFile = initLoggerInTemp()
         val beforeLevels = logFile.readText()
         try {
             (MIN_LOG_LEVEL..MAX_LOG_LEVEL).forEach(WalletManager::setLogLevel)
@@ -51,6 +50,14 @@ class LedgerLogNativeTest {
             .map { it.substringAfter(CONFIGURATION_LOG) }
         assertEquals(configurations.toString(), MAX_LOG_LEVEL - MIN_LOG_LEVEL + 1, configurations.size)
         configurations.forEach { assertTrue(it, it.endsWith(DEVICE_CAPS)) }
+    }
+
+    private fun initLoggerInTemp(): File {
+        // On Windows epee ignores argv0 and logs next to the JVM executable, out of the test's reach.
+        assumeFalse("log path is not settable on Windows", System.getProperty("os.name").startsWith("Windows"))
+        val logFile = File(temp.root, "native.log")
+        WalletManager.initLogger(File(temp.root, "native").path, logFile.name)
+        return logFile
     }
 
     /** Answers every APDU with a stand-in secret, as GET_KEY would with the private view key. */
