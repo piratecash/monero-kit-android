@@ -16,20 +16,16 @@
 
 package com.m2049r.xmrwallet.util;
 
-import android.content.Context;
-import android.system.ErrnoException;
-import android.system.Os;
-
-import com.m2049r.xmrwallet.model.WalletManager;
-
 import java.io.File;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Locale;
 
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
 
 public class Helper {
+    private static final String TAG = "MoneroKit:Helper";
+
     static public final String NOCRAZYPASS_FLAGFILE = ".nocrazypass";
 
     static public final int XMR_DECIMALS = 12;
@@ -38,34 +34,20 @@ public class Helper {
     static public final boolean SHOW_EXCHANGERATES = true;
     static public boolean ALLOW_SHIFT = true;
 
-    static private final String WALLET_DIR = "wallets";
-    static private final String MONERO_DIR = "monero";
-
     static public int DISPLAY_DIGITS_INFO = 5;
 
-    static public File getWalletRoot(Context context) {
-        return getStorage(context, WALLET_DIR);
-    }
-
-    static public File getStorage(Context context, String folderName) {
-        File dir = new File(context.getFilesDir(), folderName);
+    static public File getStorage(File base, String folderName) {
+        File dir = new File(base, folderName);
         if (!dir.exists()) {
-            Timber.i("Creating %s", dir.getAbsolutePath());
+            MoneroLog.i(TAG, "Creating %s", dir.getAbsolutePath());
             dir.mkdirs(); // try to make it
         }
         if (!dir.isDirectory()) {
             String msg = "Directory " + dir.getAbsolutePath() + " does not exist.";
-            Timber.e(msg);
+            MoneroLog.e(TAG, msg);
             throw new IllegalStateException(msg);
         }
         return dir;
-    }
-
-    static public File getWalletFile(Context context, String aWalletName) {
-        File walletDir = getWalletRoot(context);
-        File f = new File(walletDir, aWalletName);
-        Timber.d("wallet=%s size= %d", f.getAbsolutePath(), f.length());
-        return f;
     }
 
     static public BigDecimal getDecimalAmount(long amount) {
@@ -126,67 +108,5 @@ public class Helper {
                     + Character.digit(hex.charAt(i + 1), 16));
         }
         return data;
-    }
-
-    static public void setMoneroHome(Context context) {
-        try {
-            String home = getStorage(context, MONERO_DIR).getAbsolutePath();
-            Os.setenv("HOME", home, true);
-        } catch (ErrnoException ex) {
-            throw new IllegalStateException(ex);
-        }
-    }
-
-    // TODO make the log levels refer to the  WalletManagerFactory::LogLevel enum ?
-    static public void initLogger(Context context, int level) {
-        String home = getStorage(context, MONERO_DIR).getAbsolutePath();
-        WalletManager.initLogger(home + "/monerujo", "monerujo.log");
-        if (level >= WalletManager.LOGLEVEL_SILENT)
-            WalletManager.setLogLevel(level);
-    }
-
-    static public boolean useCrazyPass(Context context) {
-        File flagFile = new File(getWalletRoot(context), NOCRAZYPASS_FLAGFILE);
-        return !flagFile.exists();
-    }
-
-    // try to figure out what the real wallet password is given the user password
-    // which could be the actual wallet password or a (maybe malformed) CrAzYpass
-    // or the password used to derive the CrAzYpass for the wallet
-    static public String getWalletPassword(Context context, String walletName, String password) {
-        String walletPath = new File(getWalletRoot(context), walletName + ".keys").getAbsolutePath();
-
-        // try with entered password (which could be a legacy password or a CrAzYpass)
-        if (WalletManager.getInstance().verifyWalletPasswordOnly(walletPath, password)) {
-            return password;
-        }
-
-        // maybe this is a malformed CrAzYpass?
-        String possibleCrazyPass = CrazyPassEncoder.reformat(password);
-        if (possibleCrazyPass != null) { // looks like a CrAzYpass
-            if (WalletManager.getInstance().verifyWalletPasswordOnly(walletPath, possibleCrazyPass)) {
-                return possibleCrazyPass;
-            }
-        }
-
-        // generate & try with CrAzYpass
-        String crazyPass = KeyStoreHelper.getCrazyPass(context, password);
-        if (WalletManager.getInstance().verifyWalletPasswordOnly(walletPath, crazyPass)) {
-            return crazyPass;
-        }
-
-        // or maybe it is a broken CrAzYpass? (of which we have two variants)
-        String brokenCrazyPass2 = KeyStoreHelper.getBrokenCrazyPass(context, password, 2);
-        if ((brokenCrazyPass2 != null)
-                && WalletManager.getInstance().verifyWalletPasswordOnly(walletPath, brokenCrazyPass2)) {
-            return brokenCrazyPass2;
-        }
-        String brokenCrazyPass1 = KeyStoreHelper.getBrokenCrazyPass(context, password, 1);
-        if ((brokenCrazyPass1 != null)
-                && WalletManager.getInstance().verifyWalletPasswordOnly(walletPath, brokenCrazyPass1)) {
-            return brokenCrazyPass1;
-        }
-
-        return null;
     }
 }

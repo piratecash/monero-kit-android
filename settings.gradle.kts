@@ -20,5 +20,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "monero-kit-android"
-include(":app")
 include(":monerokit")
+include(":sample-shared")
+include(":sample-android")
+include(":sample-desktop")

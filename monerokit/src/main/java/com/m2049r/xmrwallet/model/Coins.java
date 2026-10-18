@@ -17,10 +17,13 @@
 package com.m2049r.xmrwallet.model;
 
 import java.util.List;
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
 
+@Keep
 public class Coins {
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     private long handle;

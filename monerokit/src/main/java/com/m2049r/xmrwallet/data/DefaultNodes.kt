@@ -15,11 +15,6 @@
  */
 package com.m2049r.xmrwallet.data
 
-import lombok.AllArgsConstructor
-import lombok.Getter
-
-@Getter
-@AllArgsConstructor
 enum class DefaultNodes(val uri: String) {
     AGORIST("xmr.agor.ist:18089/mainnet/agor.ist"),
     BOLDSUCK("xmr-de.boldsuck.org:18081/mainnet/boldsuck.org"),

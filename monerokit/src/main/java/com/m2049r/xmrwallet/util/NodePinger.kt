@@ -24,12 +24,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import timber.log.Timber
+import com.piratecash.monero.log.MoneroLog
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 object NodePinger {
+    private const val TAG = "MoneroKit:Node"
+
     const val NUM_THREADS: Int = 10
     const val MAX_TIME: Long = 50L // seconds
 
@@ -43,7 +45,7 @@ object NodePinger {
         try {
             exeService.invokeAll<Boolean?>(taskList, MAX_TIME, TimeUnit.SECONDS)
         } catch (ex: InterruptedException) {
-            Timber.w(ex)
+            MoneroLog.w(TAG, "Node ping interrupted", ex)
         }
         exeService.shutdownNow()
     }

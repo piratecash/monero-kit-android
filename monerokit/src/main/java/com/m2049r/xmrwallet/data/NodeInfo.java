@@ -16,10 +16,7 @@
 
 package com.m2049r.xmrwallet.data;
 
-import android.util.Log;
 
-import com.m2049r.levin.scanner.LevinPeer;
-import com.m2049r.levin.util.NetCipherHelper;
 import com.m2049r.xmrwallet.util.NodePinger;
 
 import org.json.JSONException;
@@ -31,31 +28,25 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Comparator;
 
-import lombok.Getter;
-import lombok.Setter;
 import okhttp3.HttpUrl;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
+import com.piratecash.monero.net.MoneroHttpClient;
+import com.piratecash.monero.net.MoneroProxy;
 
 public class NodeInfo extends Node {
+    private static final String TAG = "MoneroKit:Node";
+
     final static public int MIN_MAJOR_VERSION = 14;
     final static public String RPC_VERSION = "2.0";
 
-    @Getter
     private long height = 0;
-    @Getter
     private long timestamp = 0;
-    @Getter
     private int majorVersion = 0;
-    @Getter
     private double responseTime = Double.MAX_VALUE;
-    @Getter
     private int responseCode = 0;
-    @Getter
     private boolean tested = false;
-    @Getter
-    @Setter
     private boolean selecting = false;
 
     public void clear() {
@@ -102,10 +93,6 @@ public class NodeInfo extends Node {
 
     public NodeInfo(String nodeString) {
         super(nodeString);
-    }
-
-    public NodeInfo(LevinPeer levinPeer) {
-        super(levinPeer.getSocketAddress());
     }
 
     public NodeInfo(InetSocketAddress address) {
@@ -187,7 +174,7 @@ public class NodeInfo extends Node {
         return result;
     }
 
-    private NetCipherHelper.Request rpcServiceRequest(int port) {
+    private MoneroHttpClient.Request rpcServiceRequest(int port) {
         final HttpUrl url = new HttpUrl.Builder()
                 .scheme("http")
                 .host(getHost())
@@ -197,16 +184,16 @@ public class NodeInfo extends Node {
 
         try {
             final JSONObject json = new JSONObject("{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"getlastblockheader\"}");
-            return new NetCipherHelper.Request(url, json, getUsername(), getPassword());
+            return new MoneroHttpClient.Request(url, json, getUsername(), getPassword());
         } catch (JSONException ex) {
             throw new IllegalStateException(ex);
         }
     }
 
     private boolean testRpcService(int port) {
-        Timber.d("Testing %s", toNodeString());
+        MoneroLog.d(TAG, "Testing %s", getAddress());
         clear();
-        if (hostAddress.isOnion() && !NetCipherHelper.isTor()) {
+        if (hostAddress.isOnion() && MoneroProxy.current().isEmpty()) {
             tested = true; // sortof
             responseCode = 418; // I'm a teapot - or I need an Onion - who knows
             return false; // autofail
@@ -214,7 +201,7 @@ public class NodeInfo extends Node {
         try {
             long ta = System.nanoTime();
             try (Response response = rpcServiceRequest(port).execute()) {
-                Timber.d("%s: %s", response.code(), response.request().url());
+                MoneroLog.d(TAG, "%s: %s", response.code(), response.request().url());
                 responseTime = (System.nanoTime() - ta) / 1000000.0;
                 responseCode = response.code();
                 if (response.isSuccessful()) {
@@ -236,8 +223,7 @@ public class NodeInfo extends Node {
                 }
             }
         } catch (IOException | JSONException ex) {
-            Log.d("NodeInfo", "Exception: " + ex.getMessage());
-            Timber.d("EX: %s", ex.getMessage()); //TODO: do something here (show error?)
+            MoneroLog.d(TAG, "EX: %s", ex.getMessage()); //TODO: do something here (show error?)
         } finally {
             tested = true;
         }
@@ -260,4 +246,35 @@ public class NodeInfo extends Node {
     }
 
     static public final int STALE_NODE_HOURS = 2;
-}
+
+    public long getHeight() {
+        return this.height;
+    }
+
+    public long getTimestamp() {
+        return this.timestamp;
+    }
+
+    public int getMajorVersion() {
+        return this.majorVersion;
+    }
+
+    public double getResponseTime() {
+        return this.responseTime;
+    }
+
+    public int getResponseCode() {
+        return this.responseCode;
+    }
+
+    public boolean isTested() {
+        return this.tested;
+    }
+
+    public boolean isSelecting() {
+        return this.selecting;
+    }
+
+    public void setSelecting(boolean selecting) {
+        this.selecting = selecting;
+    }}

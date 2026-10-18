@@ -18,10 +18,13 @@ package com.m2049r.xmrwallet.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import com.piratecash.monero.MoneroNative;
+import androidx.annotation.Keep;
 
+@Keep
 public class TransactionHistory {
     static {
-        System.loadLibrary("monerujo");
+        MoneroNative.load();
     }
 
     private long handle;
