@@ -132,6 +132,7 @@ class WalletNativeLifecycleTest {
         try {
             wallet.refreshWithHardwareKeyImages(HardwareKeyImageRefreshResult.Request(
                 HardwareKeyImageRefreshResult.Mode.Continue,
+                startProtocolEagerly = false,
             ))
             fail("Software wallet must not enter hardware refresh")
         } catch (_: IllegalStateException) {

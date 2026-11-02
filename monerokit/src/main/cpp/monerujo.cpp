@@ -2056,6 +2056,20 @@ Java_com_m2049r_xmrwallet_model_Wallet_pauseRefreshAndDrain(
     return static_cast<jboolean>(wallet->pauseRefreshAndDrain());
 }
 
+// Called from the block callback on the refresh thread: pauseRefreshAndDrain() cannot stop a
+// controlled pass that already holds the hardware operation.
+JNIEXPORT void JNICALL
+Java_com_m2049r_xmrwallet_model_Wallet_requestControlledRefreshStop(
+        JNIEnv *env,
+        jobject instance) {
+    Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
+    if (wallet == nullptr) {
+        LOGE("wallet handle is null in %s", __FUNCTION__);
+        return;
+    }
+    wallet->stop();
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_refresh(JNIEnv *env, jobject instance) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
@@ -2168,7 +2182,8 @@ Java_com_m2049r_xmrwallet_model_Wallet_coldKeyImageSyncJ(
 
 JNIEXPORT jlongArray JNICALL
 Java_com_m2049r_xmrwallet_model_Wallet_refreshWithHardwareKeyImagesJ(
-        JNIEnv *env, jobject instance, jint mode, jlong restore_height) {
+        JNIEnv *env, jobject instance, jint mode, jlong restore_height,
+        jboolean start_protocol_eagerly) {
     Monero::Wallet *wallet = getHandle<Monero::Wallet>(env, instance);
     if (wallet == nullptr) {
         ThrowException(env, "java/lang/IllegalStateException", "Monero wallet is closed");
@@ -2196,6 +2211,7 @@ Java_com_m2049r_xmrwallet_model_Wallet_refreshWithHardwareKeyImagesJ(
     Monero::HardwareKeyImageRefreshRequest request;
     request.mode = static_cast<Monero::HardwareKeyImageRefreshRequest::Mode>(mode);
     request.restoreHeight = static_cast<uint64_t>(restore_height);
+    request.startProtocolEagerly = start_protocol_eagerly == JNI_TRUE;
     Monero::HardwareKeyImageRefreshResult result;
     const bool success = wallet->refreshWithHardwareKeyImages(request, result);
     const int hardware_error_code = wallet->hardwareWalletErrorCode();
@@ -2212,9 +2228,10 @@ Java_com_m2049r_xmrwallet_model_Wallet_refreshWithHardwareKeyImagesJ(
     const jlong values[] = {
             static_cast<jlong>(result.startHeight), static_cast<jlong>(result.finalHeight),
             static_cast<jlong>(result.suffixDetached), static_cast<jlong>(result.protocolStarted),
-            static_cast<jlong>(result.finalAckChecked), static_cast<jlong>(wallet->hasUnknownKeyImages())};
-    jlongArray response = env->NewLongArray(6);
-    if (response != nullptr) env->SetLongArrayRegion(response, 0, 6, values);
+            static_cast<jlong>(result.finalAckChecked), static_cast<jlong>(wallet->hasUnknownKeyImages()),
+            static_cast<jlong>(result.completed)};
+    jlongArray response = env->NewLongArray(7);
+    if (response != nullptr) env->SetLongArrayRegion(response, 0, 7, values);
     return response;
 }
 

@@ -395,6 +395,7 @@ struct HardwareKeyImageRefreshRequest
 {
     enum Mode { Continue, ResetToRestoreHeight } mode = Continue;
     uint64_t restoreHeight = 0;
+    bool startProtocolEagerly = false;
 };
 
 struct HardwareKeyImageRefreshResult
@@ -404,6 +405,7 @@ struct HardwareKeyImageRefreshResult
     bool suffixDetached = false;
     bool protocolStarted = false;
     bool finalAckChecked = false;
+    bool completed = false;
 };
 struct WalletListener
 {

@@ -407,6 +407,8 @@ public class Wallet {
 
     public native boolean pauseRefreshAndDrain();
 
+    public native void requestControlledRefreshStop();
+
     public native boolean refresh();
 
     public native void refreshAsync();
@@ -440,11 +442,12 @@ public class Wallet {
     public HardwareKeyImageRefreshResult refreshWithHardwareKeyImages(
             HardwareKeyImageRefreshResult.Request request) {
         if (request == null) throw new IllegalArgumentException("Refresh request is required");
-        long[] result = refreshWithHardwareKeyImagesJ(request.getMode().getNativeValue(), request.getRestoreHeight());
+        long[] result = refreshWithHardwareKeyImagesJ(
+                request.getMode().getNativeValue(), request.getRestoreHeight(), request.getStartProtocolEagerly());
         return HardwareKeyImageRefreshResult.fromNative(result);
     }
 
-    private native long[] refreshWithHardwareKeyImagesJ(int mode, long restoreHeight);
+    private native long[] refreshWithHardwareKeyImagesJ(int mode, long restoreHeight, boolean startProtocolEagerly);
 
 //TODO virtual void setAutoRefreshInterval(int millis) = 0;
 //TODO virtual int autoRefreshInterval() const = 0;
