@@ -20,6 +20,7 @@ import com.google.common.net.HostAndPort;
 import com.m2049r.xmrwallet.model.NetworkType;
 import com.m2049r.xmrwallet.model.WalletManager;
 import com.m2049r.xmrwallet.util.OnionHelper;
+import com.piratecash.monero.net.MoneroProxyKt;
 
 import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
@@ -40,6 +41,8 @@ public class Node {
     static class Address {
         final private InetAddress inet;
         final private String onion;
+        // Left for the SOCKS proxy to resolve
+        final private String unresolved;
 
         public boolean isOnion() {
             return onion != null;
@@ -48,33 +51,41 @@ public class Node {
         public String getHostName() {
             if (inet != null) {
                 return inet.getHostName();
-            } else {
+            } else if (onion != null) {
                 return onion;
+            } else {
+                return unresolved;
             }
         }
 
         public String getHostAddress() {
             if (inet != null) {
                 return inet.getHostAddress();
-            } else {
+            } else if (onion != null) {
                 return onion;
+            } else {
+                return unresolved;
             }
         }
 
-        private Address(InetAddress address, String onion) {
+        private Address(InetAddress address, String onion, String unresolved) {
             this.inet = address;
             this.onion = onion;
+            this.unresolved = unresolved;
         }
 
         static Address of(InetAddress address) {
-            return new Address(address, null);
+            return new Address(address, null, null);
         }
 
         static Address of(String host) throws UnknownHostException {
             if (OnionHelper.isOnionHost(host)) {
-                return new Address(null, host);
+                return new Address(null, host, null);
+            } else if (!MoneroProxyKt.systemSocksProxy().isEmpty()) {
+                // A local lookup would bypass the proxy and could be blocked or reveal the node
+                return new Address(null, null, host);
             } else {
-                return new Address(InetAddress.getByName(host), null);
+                return new Address(InetAddress.getByName(host), null, null);
             }
         }
 
