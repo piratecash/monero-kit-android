@@ -1,0 +1,64 @@
+diff --git a/src/device/device_ledger.cpp b/src/device/device_ledger.cpp
+index 10b18307b..f2198f60c 100644
+--- a/src/device/device_ledger.cpp
++++ b/src/device/device_ledger.cpp
+@@ -1446,6 +1446,7 @@ namespace hw {
+         key_map.clear();
+         hmac_map.clear();
+         this->tx_in_progress = true;
++        try {
+         int offset = set_command_header_noopt(INS_OPEN_TX, 0x01);
+ 
+         //account
+@@ -1471,6 +1472,11 @@ namespace hw {
+         log_hexbuffer("open_tx: [[OUT]] R ", (char*)&this->buffer_recv[0], 32);
+         log_hexbuffer("open_tx: [[OUT]] r ", r_x.data, 32);
+         #endif
++        } catch (...) {
++          // The caller only closes a tx that opened, so a failed open must release the device itself.
++          end_tx();
++          throw;
++        }
+         return true;
+     }
+ 
+@@ -2356,12 +2362,24 @@ namespace hw {
+ 
+     bool device_ledger::close_tx() {
+         AUTO_LOCK_CMD();
+-        send_simple(INS_CLOSE_TX);
++        try {
++          send_simple(INS_CLOSE_TX);
++        } catch (...) {
++          // A lost device must not keep the lock taken by open_tx.
++          end_tx();
++          throw;
++        }
++        end_tx();
++        return true;
++    }
++
++    void device_ledger::end_tx() {
++        if (!this->tx_in_progress)
++          return;
+         key_map.clear();
+         hmac_map.clear();
+         this->tx_in_progress = false;
+         this->unlock();
+-        return true;
+     }
+ 
+     /* ---------------------------------------------------------- */
+diff --git a/src/device/device_ledger.hpp b/src/device/device_ledger.hpp
+index 2b6c5783f..3bde3ec7e 100644
+--- a/src/device/device_ledger.hpp
++++ b/src/device/device_ledger.hpp
+@@ -175,6 +175,8 @@ namespace hw {
+         void receive_secret(unsigned char sec[32], int &offset);
+ 
+         bool tx_in_progress;
++        // Idempotent: a failed close_tx is followed by another one from the caller's catch.
++        void end_tx();
+ 
+         // map public destination key to ephemeral destination key
+         Keymap key_map;

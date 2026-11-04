@@ -1,0 +1,11 @@
+--- a/src/device/device_sidekick.cpp
++++ b/src/device/device_sidekick.cpp
+@@ -593,7 +593,7 @@
+             cmd.req.prefix_hash = prefix_hash;
+             cmd.req.R = R;
+             cmd.req.A = A;
+-            cmd.req.has_B = B.has_value();
++            cmd.req.has_B = static_cast<bool>(B);
+             cmd.req.B = B.value_or(crypto::null_pkey);
+             cmd.req.D = D;
+             cmd.req.rr = r;

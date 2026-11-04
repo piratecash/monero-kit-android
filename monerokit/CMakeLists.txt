@@ -2,12 +2,30 @@ cmake_minimum_required(VERSION 3.4.1)
 project(monerujo)
 message(STATUS ABI_INFO  = ${ANDROID_ABI})
 set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+if(ANDROID)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+else()
+    set(CMAKE_CXX_STANDARD 11)
+endif()
 add_library( monerujo
              SHARED
              src/main/cpp/monerujo.cpp )
 
 set(EXTERNAL_LIBS_DIR ${CMAKE_SOURCE_DIR}/external-libs)
+set(TREZOR_LIBS_DIR ${EXTERNAL_LIBS_DIR}/trezor)
+set(EXTERNAL_INCLUDE_DIR ${TREZOR_LIBS_DIR}/include)
+if(ANDROID)
+    set(ARCHIVE_LIBS_DIR ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI})
+    set(TREZOR_ARCHIVE_LIBS_DIR ${TREZOR_LIBS_DIR}/${ANDROID_ABI})
+    set(MONERO_ARCHIVE_LIBS_DIR ${ARCHIVE_LIBS_DIR}/monero)
+    set(TREZOR_MONERO_ARCHIVE_LIBS_DIR ${TREZOR_ARCHIVE_LIBS_DIR}/monero)
+else()
+    # natives/desktop/build.sh collects one desktop build of monero and its depends here
+    set(ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(TREZOR_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(MONERO_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+    set(TREZOR_MONERO_ARCHIVE_LIBS_DIR ${MONERO_DESKTOP_LIBS})
+endif()
 
 ############
 # libsodium
@@ -15,7 +33,7 @@ set(EXTERNAL_LIBS_DIR ${CMAKE_SOURCE_DIR}/external-libs)
 
 add_library(sodium STATIC IMPORTED)
 set_target_properties(sodium PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libsodium.a)
+        ${ARCHIVE_LIBS_DIR}/libsodium.a)
 
 ############
 # OpenSSL
@@ -23,11 +41,11 @@ set_target_properties(sodium PROPERTIES IMPORTED_LOCATION
 
 add_library(crypto STATIC IMPORTED)
 set_target_properties(crypto PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libcrypto.a)
+        ${ARCHIVE_LIBS_DIR}/libcrypto.a)
 
 add_library(ssl STATIC IMPORTED)
 set_target_properties(ssl PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libssl.a)
+    ${ARCHIVE_LIBS_DIR}/libssl.a)
 
 ############
 # Boost
@@ -35,39 +53,39 @@ set_target_properties(ssl PROPERTIES IMPORTED_LOCATION
 
 add_library(boost_chrono STATIC IMPORTED)
 set_target_properties(boost_chrono PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_chrono.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_chrono.a)
 
 add_library(boost_date_time STATIC IMPORTED)
 set_target_properties(boost_date_time PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_date_time.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_date_time.a)
 
 add_library(boost_filesystem STATIC IMPORTED)
 set_target_properties(boost_filesystem PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_filesystem.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_filesystem.a)
 
 add_library(boost_program_options STATIC IMPORTED)
 set_target_properties(boost_program_options PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_program_options.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_program_options.a)
 
 add_library(boost_regex STATIC IMPORTED)
 set_target_properties(boost_regex PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_regex.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_regex.a)
 
 add_library(boost_serialization STATIC IMPORTED)
 set_target_properties(boost_serialization PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_serialization.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_serialization.a)
 
 add_library(boost_system STATIC IMPORTED)
 set_target_properties(boost_system PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_system.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_system.a)
 
 add_library(boost_thread STATIC IMPORTED)
 set_target_properties(boost_thread PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_thread.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_thread.a)
 
 add_library(boost_wserialization STATIC IMPORTED)
 set_target_properties(boost_wserialization PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libboost_wserialization.a)
+    ${ARCHIVE_LIBS_DIR}/libboost_wserialization.a)
 
 #############
 # Monero
@@ -75,126 +93,137 @@ set_target_properties(boost_wserialization PROPERTIES IMPORTED_LOCATION
 
 add_library(wallet_api STATIC IMPORTED)
 set_target_properties(wallet_api PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libwallet_api.a)
+    ${TREZOR_MONERO_ARCHIVE_LIBS_DIR}/libwallet_api.a)
 
 add_library(wallet STATIC IMPORTED)
 set_target_properties(wallet PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libwallet.a)
+    ${TREZOR_MONERO_ARCHIVE_LIBS_DIR}/libwallet.a)
 
 add_library(cryptonote_core STATIC IMPORTED)
 set_target_properties(cryptonote_core PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcryptonote_core.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libcryptonote_core.a)
 
 add_library(cryptonote_basic STATIC IMPORTED)
 set_target_properties(cryptonote_basic PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcryptonote_basic.a)
+    ${TREZOR_MONERO_ARCHIVE_LIBS_DIR}/libcryptonote_basic.a)
 
 add_library(mnemonics STATIC IMPORTED)
 set_target_properties(mnemonics PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libmnemonics.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libmnemonics.a)
 
 add_library(common STATIC IMPORTED)
 set_target_properties(common PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcommon.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libcommon.a)
 
 add_library(cncrypto STATIC IMPORTED)
 set_target_properties(cncrypto PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcncrypto.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libcncrypto.a)
 
 add_library(ringct STATIC IMPORTED)
 set_target_properties(ringct PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libringct.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libringct.a)
 
 add_library(ringct_basic STATIC IMPORTED)
 set_target_properties(ringct_basic PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libringct_basic.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libringct_basic.a)
 
 add_library(blockchain_db STATIC IMPORTED)
 set_target_properties(blockchain_db PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libblockchain_db.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libblockchain_db.a)
 
 add_library(lmdb STATIC IMPORTED)
 set_target_properties(lmdb PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/liblmdb.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/liblmdb.a)
 
 add_library(easylogging STATIC IMPORTED)
 set_target_properties(easylogging PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libeasylogging.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libeasylogging.a)
 
 add_library(unbound STATIC IMPORTED)
 set_target_properties(unbound PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/libunbound.a)
+    ${ARCHIVE_LIBS_DIR}/libunbound.a)
 
 add_library(epee STATIC IMPORTED)
 set_target_properties(epee PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libepee.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libepee.a)
 
 add_library(blocks STATIC IMPORTED)
 set_target_properties(blocks PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libblocks.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libblocks.a)
 
 add_library(checkpoints STATIC IMPORTED)
 set_target_properties(checkpoints PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcheckpoints.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libcheckpoints.a)
 
 add_library(device STATIC IMPORTED)
 set_target_properties(device PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libdevice.a)
+        ${TREZOR_MONERO_ARCHIVE_LIBS_DIR}/libdevice.a)
 
 add_library(device_trezor STATIC IMPORTED)
-set_target_properties(device_trezor PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libdevice_trezor.a)
+set(device_trezor_path ${TREZOR_MONERO_ARCHIVE_LIBS_DIR}/libdevice_trezor.a)
+set_target_properties(device_trezor PROPERTIES IMPORTED_LOCATION ${device_trezor_path})
+if(NOT EXISTS ${device_trezor_path})
+    message(FATAL_ERROR "Monero hardware-wallet support requires libdevice_trezor.a for ${ANDROID_ABI}")
+endif()
+file(SIZE ${device_trezor_path} device_trezor_size)
+if(device_trezor_size LESS 100000)
+    message(FATAL_ERROR "Monero hardware-wallet support requires the real device_trezor archive for ${ANDROID_ABI}")
+endif()
+
+set(protobuf_path ${TREZOR_ARCHIVE_LIBS_DIR}/libprotobuf.a)
+if(NOT EXISTS ${protobuf_path})
+    message(FATAL_ERROR "Monero hardware-wallet support requires libprotobuf.a for ${ANDROID_ABI}")
+endif()
+add_library(protobuf STATIC IMPORTED)
+set_target_properties(protobuf PROPERTIES IMPORTED_LOCATION ${protobuf_path})
 
 add_library(multisig STATIC IMPORTED)
 set_target_properties(multisig PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libmultisig.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libmultisig.a)
 
 add_library(version STATIC IMPORTED)
 set_target_properties(version PROPERTIES IMPORTED_LOCATION
-    ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libversion.a)
+    ${MONERO_ARCHIVE_LIBS_DIR}/libversion.a)
 
 add_library(net STATIC IMPORTED)
 set_target_properties(net PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libnet.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/libnet.a)
 
 add_library(hardforks STATIC IMPORTED)
 set_target_properties(hardforks PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libhardforks.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/libhardforks.a)
 
 add_library(randomx STATIC IMPORTED)
 set_target_properties(randomx PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/librandomx.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/librandomx.a)
 
 add_library(rpc_base STATIC IMPORTED)
 set_target_properties(rpc_base PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/librpc_base.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/librpc_base.a)
 
 add_library(wallet-crypto STATIC IMPORTED)
 set_target_properties(wallet-crypto PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libwallet-crypto.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/libwallet-crypto.a)
 
 add_library(cryptonote_format_utils_basic STATIC IMPORTED)
 set_target_properties(cryptonote_format_utils_basic PROPERTIES IMPORTED_LOCATION
-        ${EXTERNAL_LIBS_DIR}/${ANDROID_ABI}/monero/libcryptonote_format_utils_basic.a)
+        ${MONERO_ARCHIVE_LIBS_DIR}/libcryptonote_format_utils_basic.a)
 
 #############
 # System
 #############
 
-find_library( log-lib log )
-
-include_directories( ${EXTERNAL_LIBS_DIR}/include )
+include_directories( ${EXTERNAL_INCLUDE_DIR} )
 
 message(STATUS EXTERNAL_LIBS_DIR :  ${EXTERNAL_LIBS_DIR})
 
-if(${ANDROID_ABI} STREQUAL "x86_64")
+if(EXISTS ${MONERO_ARCHIVE_LIBS_DIR}/libwallet-crypto.a)
     set(EXTRA_LIBS "wallet-crypto")
 else()
     set(EXTRA_LIBS "")
 endif()
 
-target_link_libraries(  monerujo
-
+set(MONERUJO_LIBS
                         wallet_api
                         wallet
                         cryptonote_core
@@ -215,6 +244,7 @@ target_link_libraries(  monerujo
                         checkpoints
                         device
                         device_trezor
+                        protobuf
                         multisig
                         version
                         randomx
@@ -236,6 +266,32 @@ target_link_libraries(  monerujo
                         crypto
 
                         sodium
-
-                       ${log-lib}
                        )
+
+if(ANDROID)
+    find_library( log-lib log )
+    target_link_libraries(monerujo ${MONERUJO_LIBS} ${log-lib})
+else()
+    if(WIN32)
+        set(JNI_PLATFORM win32)
+    elseif(APPLE)
+        set(JNI_PLATFORM darwin)
+    else()
+        set(JNI_PLATFORM linux)
+    endif()
+    include_directories(${JNI_HEADER_DIR} ${JNI_HEADER_DIR}/${JNI_PLATFORM})
+    if(WIN32)
+        set_target_properties(monerujo PROPERTIES PREFIX "")
+        # Wallet::init imbues a boost::locale on Windows only; depends builds it on ICU.
+        target_link_directories(monerujo PRIVATE ${MONERO_DESKTOP_LIBS})
+        target_link_libraries(monerujo -Wl,--start-group ${MONERUJO_LIBS}
+                boost_locale icuio icui18n icuuc icudata icutu iconv -Wl,--end-group
+                -static -lssp ws2_32 crypt32 iphlpapi)
+    elseif(APPLE)
+        # IOKit: the miner's battery-power check (cryptonote_basic/miner.cpp)
+        target_link_libraries(monerujo ${MONERUJO_LIBS} "-framework IOKit")
+    else()
+        target_link_libraries(monerujo -Wl,--start-group ${MONERUJO_LIBS} -Wl,--end-group
+                -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,noexecstack pthread dl)
+    endif()
+endif()

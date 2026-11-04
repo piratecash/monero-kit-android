@@ -16,6 +16,9 @@
 
 package com.m2049r.xmrwallet.model;
 
+import androidx.annotation.Keep;
+
+@Keep
 public interface WalletListener {
     /**
      * moneySpent - called when money spent

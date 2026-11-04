@@ -20,6 +20,7 @@ import com.google.common.net.HostAndPort;
 import com.m2049r.xmrwallet.model.NetworkType;
 import com.m2049r.xmrwallet.model.WalletManager;
 import com.m2049r.xmrwallet.util.OnionHelper;
+import com.piratecash.monero.net.MoneroProxyKt;
 
 import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
@@ -28,11 +29,11 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
 
-import lombok.Getter;
-import lombok.Setter;
-import timber.log.Timber;
+import com.piratecash.monero.log.MoneroLog;
 
 public class Node {
+    private static final String TAG = "MoneroKit:Node";
+
     static public final String MAINNET = "mainnet";
     static public final String STAGENET = "stagenet";
     static public final String TESTNET = "testnet";
@@ -40,6 +41,8 @@ public class Node {
     static class Address {
         final private InetAddress inet;
         final private String onion;
+        // Left for the SOCKS proxy to resolve
+        final private String unresolved;
 
         public boolean isOnion() {
             return onion != null;
@@ -48,33 +51,41 @@ public class Node {
         public String getHostName() {
             if (inet != null) {
                 return inet.getHostName();
-            } else {
+            } else if (onion != null) {
                 return onion;
+            } else {
+                return unresolved;
             }
         }
 
         public String getHostAddress() {
             if (inet != null) {
                 return inet.getHostAddress();
-            } else {
+            } else if (onion != null) {
                 return onion;
+            } else {
+                return unresolved;
             }
         }
 
-        private Address(InetAddress address, String onion) {
+        private Address(InetAddress address, String onion, String unresolved) {
             this.inet = address;
             this.onion = onion;
+            this.unresolved = unresolved;
         }
 
         static Address of(InetAddress address) {
-            return new Address(address, null);
+            return new Address(address, null, null);
         }
 
         static Address of(String host) throws UnknownHostException {
             if (OnionHelper.isOnionHost(host)) {
-                return new Address(null, host);
+                return new Address(null, host, null);
+            } else if (!MoneroProxyKt.systemSocksProxy().isEmpty()) {
+                // A local lookup would bypass the proxy and could be blocked or reveal the node
+                return new Address(null, null, host);
             } else {
-                return new Address(InetAddress.getByName(host), null);
+                return new Address(InetAddress.getByName(host), null, null);
             }
         }
 
@@ -89,28 +100,15 @@ public class Node {
         }
     }
 
-    @Getter
     private String name = null;
-    @Getter
     final private NetworkType networkType;
     Address hostAddress;
-    @Getter
     private String host;
-    @Getter
-    @Setter
     int rpcPort = 0;
     private int levinPort = 0;
-    @Getter
-    @Setter
     private String username = "";
-    @Getter
-    @Setter
     private String password = "";
-    @Getter
-    @Setter
     private boolean favourite = false;
-    @Getter
-    @Setter
     private boolean selected = false;
 
     @Override
@@ -136,7 +134,7 @@ public class Node {
         try {
             return new Node(nodeString);
         } catch (IllegalArgumentException ex) {
-            Timber.w(ex);
+            MoneroLog.w(TAG, "Invalid node string", ex);
             return null;
         }
     }
@@ -200,7 +198,7 @@ public class Node {
             try {
                 name = URLDecoder.decode(daParts[2], "UTF-8");
             } catch (UnsupportedEncodingException ex) {
-                Timber.w(ex); // if we can't encode it, we don't use it
+                MoneroLog.w(TAG, "Cannot decode node name", ex); // if we can't encode it, we don't use it
             }
         }
         this.name = name;
@@ -242,7 +240,7 @@ public class Node {
             try {
                 sb.append("/").append(URLEncoder.encode(name, "UTF-8"));
             } catch (UnsupportedEncodingException ex) {
-                Timber.w(ex); // if we can't encode it, we don't store it
+                MoneroLog.w(TAG, "Cannot encode node name", ex); // if we can't encode it, we don't store it
             }
         return sb.toString();
     }
@@ -359,5 +357,57 @@ public class Node {
                 throw new IllegalStateException("unsupported net " + WalletManager.getInstance().getNetworkType());
         }
         return DEFAULT_RPC_PORT;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    public NetworkType getNetworkType() {
+        return this.networkType;
+    }
+
+    public String getHost() {
+        return this.host;
+    }
+
+    public int getRpcPort() {
+        return this.rpcPort;
+    }
+
+    public void setRpcPort(int rpcPort) {
+        this.rpcPort = rpcPort;
+    }
+
+    public String getUsername() {
+        return this.username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
+        return this.password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public boolean isFavourite() {
+        return this.favourite;
+    }
+
+    public void setFavourite(boolean favourite) {
+        this.favourite = favourite;
+    }
+
+    public boolean isSelected() {
+        return this.selected;
+    }
+
+    public void setSelected(boolean selected) {
+        this.selected = selected;
     }
 }
