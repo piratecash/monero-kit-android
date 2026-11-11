@@ -1,0 +1,163 @@
+diff --git a/src/wallet/api/wallet.cpp b/src/wallet/api/wallet.cpp
+index a450597e0..79f2f3271 100644
+--- a/src/wallet/api/wallet.cpp
++++ b/src/wallet/api/wallet.cpp
+@@ -1352,6 +1352,7 @@ bool WalletImpl::refreshWithHardwareKeyImages(
+                 ? tools::hardware_key_image_refresh_request::mode::ResetToRestoreHeight
+                 : tools::hardware_key_image_refresh_request::mode::Continue;
+         native_request.restore_height = request.restoreHeight;
++        native_request.start_protocol_eagerly = request.startProtocolEagerly;
+         tools::hardware_key_image_refresh_result native_result;
+         executeConnectedHardwareOperation([&] {
+             native_result = m_wallet->refresh_with_hardware_key_images(native_request);
+@@ -1361,6 +1362,7 @@ bool WalletImpl::refreshWithHardwareKeyImages(
+         result.suffixDetached = native_result.suffix_detached;
+         result.protocolStarted = native_result.protocol_started;
+         result.finalAckChecked = native_result.final_ack_checked;
++        result.completed = native_result.completed;
+         return true;
+     } catch (const hw::trezor::exc::HardwareWalletException &error) {
+         setHardwareWalletError(error.code(), error.what(), Status_Error);
+diff --git a/src/wallet/api/wallet2_api.h b/src/wallet/api/wallet2_api.h
+index de76a3260..e419bad17 100644
+--- a/src/wallet/api/wallet2_api.h
++++ b/src/wallet/api/wallet2_api.h
+@@ -395,6 +395,7 @@ struct HardwareKeyImageRefreshRequest
+ {
+     enum Mode { Continue, ResetToRestoreHeight } mode = Continue;
+     uint64_t restoreHeight = 0;
++    bool startProtocolEagerly = false;
+ };
+ 
+ struct HardwareKeyImageRefreshResult
+@@ -404,6 +405,7 @@ struct HardwareKeyImageRefreshResult
+     bool suffixDetached = false;
+     bool protocolStarted = false;
+     bool finalAckChecked = false;
++    bool completed = false;
+ };
+ struct WalletListener
+ {
+diff --git a/src/wallet/wallet2.cpp b/src/wallet/wallet2.cpp
+index a2f553f92..cf6f5776b 100644
+--- a/src/wallet/wallet2.cpp
++++ b/src/wallet/wallet2.cpp
+@@ -1191,6 +1191,7 @@ wallet2::wallet2(network_type nettype, uint64_t kdf_rounds, bool unattended, std
+   m_multisig_rescan_k(NULL),
+   m_upper_transaction_weight_limit(0),
+   m_run(true),
++  m_controlled_hardware_refresh(false),
+   m_callback(0),
+   m_trusted_daemon(false),
+   m_nettype(nettype),
+@@ -4019,6 +4020,8 @@ void wallet2::refresh(bool trusted_daemon, uint64_t start_height, uint64_t & blo
+     std::vector<parsed_block> next_parsed_blocks;
+     bool error;
+     std::exception_ptr exception;
++    // Not error/exception: the fetch thread resets those when it starts, possibly after processing failed.
++    std::exception_ptr process_exception;
+     try
+     {
+       // pull the next set of blocks while we're processing the current one
+@@ -4067,13 +4070,15 @@ void wallet2::refresh(bool trusted_daemon, uint64_t start_height, uint64_t & blo
+         catch (const std::exception &e)
+         {
+           MERROR("Error parsing blocks: " << e.what());
+-          exception = std::current_exception();
+-          error = true;
++          process_exception = std::current_exception();
+         }
+         blocks_fetched += added_blocks;
+       }
+       THROW_WALLET_EXCEPTION_IF(!waiter.wait(), error::wallet_internal_error, "Exception in thread pool");
+ 
++      if (process_exception)
++        std::rethrow_exception(process_exception);
++
+       // handle error from async fetching thread
+       if (error)
+       {
+@@ -4129,6 +4134,9 @@ void wallet2::refresh(bool trusted_daemon, uint64_t start_height, uint64_t & blo
+     {
+       blocks_fetched += added_blocks;
+       THROW_WALLET_EXCEPTION_IF(!waiter.wait(), error::wallet_internal_error, "Exception in thread pool");
++      // A retry would end the stopped loop silently, so a controlled pass would report a clean stop.
++      if (m_controlled_hardware_refresh && !m_run.load(std::memory_order_relaxed))
++        throw;
+       if(try_count < 3)
+       {
+         LOG_PRINT_L1("Another try pull_blocks (try_count=" << try_count << ")...");
+@@ -4151,10 +4159,16 @@ void wallet2::refresh(bool trusted_daemon, uint64_t start_height, uint64_t & blo
+   if(last_tx_hash_id != (m_transfers.size() ? m_transfers.back().m_txid : null_hash))
+     received_money = true;
+ 
++  const bool stopped = !m_run.load(std::memory_order_relaxed);
++  // pull_blocks() already advanced the incremental pool cursor; without the pool pass below the
++  // next request would omit the pool txs it returned.
++  if (stopped)
++    m_pool_info_query_time = 0;
++
+   try
+   {
+     // If stop() is called we don't need to check pending transactions
+-    if (check_pool && m_run.load(std::memory_order_relaxed) && !m_process_pool_txs.empty())
++    if (check_pool && !stopped && !m_process_pool_txs.empty())
+       process_pool_state(m_process_pool_txs);
+   }
+   catch (...)
+@@ -5886,19 +5900,20 @@ hardware_key_image_refresh_result wallet2::refresh_with_hardware_key_images(
+ 
+   device.begin_live_refresh_session();
+   const auto cleanup = epee::misc_utils::create_scope_leave_handler([&] {
++    m_controlled_hardware_refresh = false;
+     device.abort_live_refresh_session();
+   });
++  m_controlled_hardware_refresh = true;
+   try
+   {
++    // Asks the on-device confirmation now, even if no owned output appears in this pass.
++    if (request.start_protocol_eagerly)
++      cold_device->live_refresh_start();
+     uint64_t blocks_fetched = 0;
+     refresh(false, 0, blocks_fetched);
+-    // refresh() treats stop() as a normal early return. That is correct for
+-    // ordinary background refreshes, but a controlled Live Refresh may not
+-    // commit an incomplete replay as successful.
+-    if (!m_run.load(std::memory_order_relaxed))
+-      throw hw::trezor::exc::HardwareWalletException(
+-          hw::trezor::exc::HardwareWalletErrorCode::Cancelled,
+-          "Live Refresh was interrupted");
++    // stop() lands only between batches: every processed transfer has its key image, so an
++    // interrupted pass is a valid checkpoint the caller continues from.
++    result.completed = m_run.load(std::memory_order_relaxed);
+     result.final_ack_checked = device.finish_live_refresh_session();
+   }
+   catch (...)
+diff --git a/src/wallet/wallet2.h b/src/wallet/wallet2.h
+index 7ad2e4c10..072babde5 100644
+--- a/src/wallet/wallet2.h
++++ b/src/wallet/wallet2.h
+@@ -95,6 +95,7 @@ namespace tools
+   {
+     enum class mode { Continue, ResetToRestoreHeight } refresh_mode = mode::Continue;
+     uint64_t restore_height = 0;
++    bool start_protocol_eagerly = false;
+   };
+ 
+   struct hardware_key_image_refresh_result
+@@ -104,6 +105,7 @@ namespace tools
+     bool suffix_detached = false;
+     bool protocol_started = false;
+     bool final_ack_checked = false;
++    bool completed = false;
+   };
+ 
+   class ringdb;
+@@ -1907,6 +1909,7 @@ private:
+     serializable_unordered_map<crypto::public_key, crypto::key_image> m_cold_key_images;
+ 
+     std::atomic<bool> m_run;
++    bool m_controlled_hardware_refresh;
+ 
+     boost::recursive_mutex m_daemon_rpc_mutex;
+ 
