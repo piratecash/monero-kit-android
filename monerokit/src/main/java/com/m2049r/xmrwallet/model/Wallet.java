@@ -31,6 +31,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import com.piratecash.monero.log.MoneroLog;
 import com.piratecash.monero.MoneroNative;
@@ -186,15 +187,19 @@ public class Wallet {
     }
 
     public String getAddress(int accountIndex) {
-        return getAddressJ(accountIndex, 0);
+        return readAddress(accountIndex, 0);
     }
 
     public String getSubaddress(int addressIndex) {
-        return getAddressJ(accountIndex, addressIndex);
+        return readAddress(accountIndex, addressIndex);
     }
 
     public String getSubaddress(int accountIndex, int addressIndex) {
-        return getAddressJ(accountIndex, addressIndex);
+        return readAddress(accountIndex, addressIndex);
+    }
+
+    private String readAddress(int accountIndex, int addressIndex) {
+        return nativeCallGate.read(() -> getAddressJ(accountIndex, addressIndex), null);
     }
 
     private native String getAddressJ(int accountIndex, int addressIndex);
@@ -522,12 +527,19 @@ public class Wallet {
 
     public TransactionHistory getHistory() {
         if (history == null) {
-            history = new TransactionHistory(getHistoryJ(), accountIndex);
+            long historyHandle = nativeCallGate.read(this::getHistoryJ);
+            // Not cached: a close that fails reopens the gate, and the next call gets the real history.
+            if (historyHandle == 0) return TransactionHistory.detached(accountIndex);
+            history = new TransactionHistory(historyHandle, accountIndex);
         }
         return history;
     }
 
     private native long getHistoryJ();
+
+    <T> T readNative(Supplier<T> action, T rejected) {
+        return nativeCallGate.read(action, rejected);
+    }
 
     public void refreshHistory() {
         getHistory().refreshWithNotes(this);
@@ -590,6 +602,7 @@ public class Wallet {
         String label = getSubaddressLabel(accountIndex, 0);
         if (label.equals(NEW_ACCOUNT_NAME)) {
             String address = getAddress(accountIndex);
+            if (address == null) return label;
             int len = address.length();
             label = address.substring(0, 6) + "\u2026" + address.substring(len - 6, len);
         }

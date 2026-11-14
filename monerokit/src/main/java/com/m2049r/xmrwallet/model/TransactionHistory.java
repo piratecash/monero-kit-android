@@ -43,10 +43,21 @@ public class TransactionHistory {
         this.accountIndex = accountIndex;
     }
 
-    private void loadNotes(Wallet wallet) {
+    // Stands in while the wallet closes: the native getCount() does not check for a null handle.
+    static TransactionHistory detached(int accountIndex) {
+        return new TransactionHistory(0, accountIndex) {
+            @Override
+            public int getCount() {
+                return 0;
+            }
+        };
+    }
+
+    private static List<TransactionInfo> withNotes(List<TransactionInfo> transactions, Wallet wallet) {
         for (TransactionInfo info : transactions) {
             info.notes = wallet.getUserNote(info.hash);
         }
+        return transactions;
     }
 
     public native int getCount(); // over all accounts/subaddresses
@@ -61,13 +72,9 @@ public class TransactionHistory {
 
     private List<TransactionInfo> transactions = new ArrayList<>();
 
+    // A refresh refused by a closing wallet keeps the list it already had.
     public void refreshWithNotes(Wallet wallet) {
-        refresh();
-        loadNotes(wallet);
-    }
-
-    private void refresh() {
-        transactions = refreshJ(accountIndex);
+        transactions = wallet.readNative(() -> withNotes(refreshJ(accountIndex), wallet), transactions);
     }
 
     private native List<TransactionInfo> refreshJ(int accountIndex);

@@ -2,6 +2,7 @@ package com.m2049r.xmrwallet.model;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 final class WalletNativeCallGate {
     private int activeReads;
@@ -9,18 +10,32 @@ final class WalletNativeCallGate {
     private boolean closing;
 
     long read(LongSupplier action) {
-        synchronized (this) {
-            if (closed || closing) return 0;
-            activeReads++;
-        }
+        if (!enter()) return 0;
         try {
             return action.getAsLong();
         } finally {
-            synchronized (this) {
-                activeReads--;
-                if (activeReads == 0) notifyAll();
-            }
+            exit();
         }
+    }
+
+    <T> T read(Supplier<T> action, T rejected) {
+        if (!enter()) return rejected;
+        try {
+            return action.get();
+        } finally {
+            exit();
+        }
+    }
+
+    private synchronized boolean enter() {
+        if (closed || closing) return false;
+        activeReads++;
+        return true;
+    }
+
+    private synchronized void exit() {
+        activeReads--;
+        if (activeReads == 0) notifyAll();
     }
 
     boolean close(BooleanSupplier action) {
