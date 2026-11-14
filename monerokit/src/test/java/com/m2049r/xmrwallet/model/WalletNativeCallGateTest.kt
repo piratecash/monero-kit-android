@@ -3,6 +3,7 @@ package com.m2049r.xmrwallet.model
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -180,6 +181,63 @@ class WalletNativeCallGateTest {
         assertTrue(interruptedAfterClose.get())
     }
 
+    @Test
+    fun read_supplierWhileClosing_returnsRejectedWithoutRunningAction() {
+        val gate = WalletNativeCallGate()
+        val closeActionEntered = CountDownLatch(1)
+        val releaseCloseAction = CountDownLatch(1)
+        val close = executor.submit<Boolean> {
+            gate.close {
+                closeActionEntered.countDown()
+                releaseCloseAction.await()
+                true
+            }
+        }
+        assertTrue(closeActionEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+
+        val readActionCalls = AtomicInteger()
+        try {
+            assertNull(gate.read<String?>({ readActionCalls.incrementAndGet(); ADDRESS }, null))
+        } finally {
+            releaseCloseAction.countDown()
+        }
+        assertTrue(close.getOrFail())
+        assertNull(gate.read<String?>({ readActionCalls.incrementAndGet(); ADDRESS }, null))
+        assertEquals(0, readActionCalls.get())
+    }
+
+    @Test
+    fun close_activeSupplierRead_waitsForReadBeforeClosing() {
+        val gate = WalletNativeCallGate()
+        val readEntered = CountDownLatch(1)
+        val releaseRead = CountDownLatch(1)
+        val read = executor.submit<String?> {
+            gate.read<String?>({
+                readEntered.countDown()
+                releaseRead.await()
+                ADDRESS
+            }, null)
+        }
+        assertTrue(readEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+
+        val closeActionStarted = CountDownLatch(1)
+        val close = executor.submit<Boolean> {
+            gate.close {
+                closeActionStarted.countDown()
+                true
+            }
+        }
+
+        try {
+            assertTrue(awaitRejectedRead(gate, closeActionStarted))
+            assertEquals(1L, closeActionStarted.count)
+        } finally {
+            releaseRead.countDown()
+        }
+        assertEquals(ADDRESS, read.getOrFail())
+        assertTrue(close.getOrFail())
+    }
+
     private fun awaitRejectedRead(gate: WalletNativeCallGate, closeActionStarted: CountDownLatch): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS)
         while (System.nanoTime() < deadline && closeActionStarted.count > 0) {
@@ -202,6 +260,7 @@ class WalletNativeCallGateTest {
 
     private companion object {
         const val READ_RESULT = 7L
+        const val ADDRESS = "address"
         const val TIMEOUT_SECONDS = 5L
     }
 
